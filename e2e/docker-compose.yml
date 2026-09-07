@@ -1,0 +1,60 @@
+name: cpa-key-quota-e2e
+
+services:
+  builder:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.plugin
+    image: local/cpa-key-quota-plugin:e2e
+    volumes:
+      - plugin_lib:/out
+
+  mock:
+    image: python:3.12-alpine
+    command: ["python", "/app/mock.py"]
+    volumes:
+      - ./mock.py:/app/mock.py:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  cpa:
+    image: eceasy/cli-proxy-api:latest
+    depends_on:
+      builder:
+        condition: service_completed_successfully
+      mock:
+        condition: service_healthy
+    command: ["./CLIProxyAPI", "-config", "/CLIProxyAPI/config.yaml", "-local-model"]
+    volumes:
+      - ./cpa-config.yaml:/CLIProxyAPI/config.yaml:ro
+      - plugin_lib:/CLIProxyAPI/plugins
+      - cpa_data:/CLIProxyAPI/data
+      - cpa_auths:/CLIProxyAPI/auths
+    ports:
+      - "18317:8317"
+    expose:
+      - "8317"
+
+  e2e:
+    image: python:3.12-alpine
+    depends_on:
+      cpa:
+        condition: service_started
+      mock:
+        condition: service_healthy
+    environment:
+      CPA_URL: http://cpa:8317
+      MGMT_KEY: e2e-mgmt-key
+    volumes:
+      - ./e2e.py:/app/e2e.py:ro
+    command: ["python", "/app/e2e.py"]
+
+volumes:
+  plugin_lib:
+  cpa_data:
+  cpa_auths:

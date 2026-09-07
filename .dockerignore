@@ -1,0 +1,9 @@
+web/node_modules
+web/dist
+.git
+**/*.so
+**/*.h
+**/*-state.json
+e2e/.data
+.gomodcache
+.gocache

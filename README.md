@@ -42,3 +42,11 @@ USD comes from Plus `GET /v0/management/billing/model-prices` (cached). Matching
 ## Config
 
 See `config.example.yaml`. Default state file: `cpa-key-quota-state.json`.
+
+## Docker E2E
+
+```bash
+make e2e-docker
+```
+
+Builds the linux `.so`, starts official CPA plus mock Plus prices and a mock OpenAI-compat upstream, then hits real `/v1/chat/completions` and management routes. Details: [e2e/README.md](./e2e/README.md).
