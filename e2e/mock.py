@@ -1,25 +1,9 @@
 #!/usr/bin/env python3
-"""Mock Plus price table + OpenAI-compatible chat completions for CPA E2E."""
+"""Mock OpenAI-compatible chat completions only. Prices come from Home."""
 
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
-
-PRICES = {
-    "items": [
-        {
-            "provider": "",
-            "model": "gpt-4.1-mini",
-            "service_tier": "*",
-            "min_input_tokens": 0,
-            "input_price_per_million": 1000.0,
-            "output_price_per_million": 0.0,
-            "cache_read_price_per_million": 0.0,
-            "request_price": 0.0,
-            "enabled": True,
-        }
-    ]
-}
 
 lock = threading.Lock()
 chat_calls = 0
@@ -27,12 +11,12 @@ chat_calls = 0
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
-        print(f"[mock] {self.command} {self.path} {fmt % args}", flush=True)
+        print(f"[mock-llm] {self.command} {self.path} {fmt % args}", flush=True)
 
-    def _send(self, status, payload, content_type="application/json"):
-        body = payload if isinstance(payload, (bytes, bytearray)) else json.dumps(payload).encode()
+    def _send(self, status, payload):
+        body = json.dumps(payload).encode()
         self.send_response(status)
-        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -41,9 +25,6 @@ class Handler(BaseHTTPRequestHandler):
         path = self.path.split("?", 1)[0]
         if path in ("/healthz", "/"):
             self._send(200, {"ok": True, "chat_calls": chat_calls})
-            return
-        if path == "/v0/management/billing/model-prices":
-            self._send(200, PRICES)
             return
         self._send(404, {"error": "not found", "path": path})
 
@@ -56,7 +37,7 @@ class Handler(BaseHTTPRequestHandler):
             with lock:
                 chat_calls += 1
                 n = chat_calls
-            print(f"[mock] chat completion #{n} auth={self.headers.get('Authorization')!r} body={raw[:200]!r}", flush=True)
+            print(f"[mock-llm] completion #{n} body={raw[:180]!r}", flush=True)
             self._send(
                 200,
                 {
@@ -82,11 +63,7 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found", "path": path})
 
 
-def main():
-    server = ThreadingHTTPServer(("0.0.0.0", 8080), Handler)
-    print("[mock] listening on :8080", flush=True)
-    server.serve_forever()
-
-
 if __name__ == "__main__":
-    main()
+    server = ThreadingHTTPServer(("0.0.0.0", 8080), Handler)
+    print("[mock-llm] listening on :8080", flush=True)
+    server.serve_forever()

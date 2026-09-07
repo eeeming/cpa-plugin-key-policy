@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 
 CPA = os.environ.get("CPA_URL", "http://cpa:8317").rstrip("/")
+HOME = os.environ.get("HOME_URL", "http://home:8327").rstrip("/")
 MGMT = os.environ.get("MGMT_KEY", "e2e-mgmt-key")
 PLUGIN = "cpa-key-quota"
 MODEL = "gpt-4.1-mini"
@@ -77,17 +78,21 @@ def error_code(payload) -> str:
     return ""
 
 
+def home(method: str, path: str, body: dict | None = None):
+    return http(method, HOME + path, headers={"Authorization": "Bearer " + MGMT}, body=body)
+
+
 def wait_cpa(timeout: float = 90) -> None:
     deadline = time.time() + timeout
     last = None
     while time.time() < deadline:
         status, payload, raw = mgmt("GET", f"/v0/management/plugins/{PLUGIN}/status")
-        if status == 200:
+        if status == 200 and isinstance(payload, dict) and payload.get("prices_available"):
             ok(f"plugin status {payload}")
             return
         last = (status, payload, raw)
         time.sleep(1.5)
-    raise SystemExit(f"CPA/plugin never became ready: last={last}")
+    raise SystemExit(f"CPA/plugin never became ready with Home prices: last={last}")
 
 
 def usage_daily(key_id: str) -> float:
@@ -127,9 +132,29 @@ def patch(key_id: str, **fields):
     ok(f"patched {key_id} {fields}")
 
 
+def assert_home_prices() -> None:
+    status, payload, _ = home("GET", "/v0/management/billing/model-prices")
+    if status != 200 or not isinstance(payload, dict):
+        fail(f"Home model-prices HTTP {status} {payload}")
+        return
+    items = payload.get("items") or []
+    priced = [
+        row
+        for row in items
+        if isinstance(row, dict)
+        and row.get("model") == MODEL
+        and float(row.get("input_price_per_million") or 0) == 1000
+    ]
+    if not priced:
+        fail(f"Home price table missing gpt-4.1-mini @ 1000/M: {payload}")
+        return
+    ok(f"Home price table has {len(priced)} matching rules (schema={payload.get('price_rule_schema_version')})")
+
+
 def main() -> int:
-    print(f"E2E against {CPA}", flush=True)
+    print(f"E2E against CPA={CPA} Home={HOME}", flush=True)
     wait_cpa()
+    assert_home_prices()
 
     # 1) Unbound key must reach the mock upstream.
     status, payload, _ = chat(UNBOUND)

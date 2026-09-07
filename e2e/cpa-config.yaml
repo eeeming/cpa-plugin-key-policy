@@ -29,7 +29,7 @@ plugins:
       enabled: true
       priority: 10
       state_file: "/CLIProxyAPI/data/cpa-key-quota-state.json"
-      plus_base_url: "http://mock:8080"
+      plus_base_url: "http://home:8327"
       plus_management_key: "e2e-mgmt-key"
 
 openai-compatibility:

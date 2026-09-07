@@ -49,4 +49,4 @@ See `config.example.yaml`. Default state file: `cpa-key-quota-state.json`.
 make e2e-docker
 ```
 
-Builds the linux `.so`, starts official CPA plus mock Plus prices and a mock OpenAI-compat upstream, then hits real `/v1/chat/completions` and management routes. Details: [e2e/README.md](./e2e/README.md).
+Builds the linux `.so`, starts official CPA and Home (Plus `billing/model-prices`), plus a mock OpenAI-compat upstream, then hits real `/v1/chat/completions`. Details: [e2e/README.md](./e2e/README.md).

@@ -9,6 +9,32 @@ services:
     volumes:
       - plugin_lib:/out
 
+  home:
+    image: eceasy/cli-proxy-api-home:latest
+    working_dir: /CLIProxyAPIHome
+    entrypoint: ["/bin/sh", "/import/home-entrypoint.sh"]
+    volumes:
+      - ./cluster.yaml:/CLIProxyAPIHome/cluster.yaml:ro
+      - ./home-config.yaml:/import/config.yaml:ro
+      - ./home-entrypoint.sh:/import/home-entrypoint.sh:ro
+      - home_data:/CLIProxyAPIHome/data
+      - home_auths:/CLIProxyAPIHome/auths
+    ports:
+      - "18327:8327"
+    expose:
+      - "8327"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "./CLIProxyAPIHome",
+          "-h",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+      start_period: 8s
+
   mock:
     image: python:3.12-alpine
     command: ["python", "/app/mock.py"]
@@ -22,13 +48,25 @@ services:
       timeout: 2s
       retries: 15
 
+  home-init:
+    image: python:3.12-alpine
+    depends_on:
+      home:
+        condition: service_started
+    environment:
+      HOME_URL: http://home:8327
+      MGMT_KEY: e2e-mgmt-key
+    volumes:
+      - ./seed_prices.py:/app/seed_prices.py:ro
+    command: ["python", "/app/seed_prices.py"]
+
   cpa:
     image: eceasy/cli-proxy-api:latest
     depends_on:
-      builder:
-        condition: service_completed_successfully
       mock:
         condition: service_healthy
+      home:
+        condition: service_started
     command: ["./CLIProxyAPI", "-config", "/CLIProxyAPI/config.yaml", "-local-model"]
     volumes:
       - ./cpa-config.yaml:/CLIProxyAPI/config.yaml:ro
@@ -47,8 +85,11 @@ services:
         condition: service_started
       mock:
         condition: service_healthy
+      home:
+        condition: service_started
     environment:
       CPA_URL: http://cpa:8317
+      HOME_URL: http://home:8327
       MGMT_KEY: e2e-mgmt-key
     volumes:
       - ./e2e.py:/app/e2e.py:ro
@@ -58,3 +99,5 @@ volumes:
   plugin_lib:
   cpa_data:
   cpa_auths:
+  home_data:
+  home_auths:
