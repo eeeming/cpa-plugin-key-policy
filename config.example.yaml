@@ -9,6 +9,8 @@ plugins:
       enabled: true
       priority: 10
       state_file: "cpa-key-quota-state.json"
-      # Plus/Home model-prices (optional). Empty = RPM only, no USD limits.
-      plus_base_url: "http://127.0.0.1:8317"
-      plus_management_key: "replace-with-management-key"
+      # Price table (optional). Empty URL = RPM only, no USD limits.
+      # CPA-Manager-Plus: GET /v0/management/model-prices (Bearer admin key).
+      # Home/Plus fallback: GET /v0/management/billing/model-prices.
+      plus_base_url: "http://127.0.0.1:18317"
+      plus_management_key: "replace-with-manager-plus-admin-key"

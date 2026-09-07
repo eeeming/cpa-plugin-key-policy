@@ -11,6 +11,65 @@ import (
 // TestQuotaPipeline is the in-process end-to-end path:
 // register → bind → intercept under limit → usage.handle → intercept over limit → GET keys/usage.
 // It fails if any hop is skipped.
+func TestQuotaPipelineFromCPAMPPrices(t *testing.T) {
+	app := configureApp(t)
+	list, err := policy.ParseModelPrices([]byte(`{"prices":{"gpt-4.1-mini":{"prompt":1000,"completion":0,"cacheRead":0}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.Store().SetPriceLister(func() ([]policy.ModelPrice, error) { return list, nil })
+
+	plain := "sk-cpamp-client"
+	bind := callManagement(t, app, http.MethodPost, "/v0/management/plugins/"+PluginID+"/keys", mustJSON(map[string]any{
+		"id": "cpamp", "name": "cpamp", "key": plain, "rpm": 50, "daily_limit_usd": 1.5,
+	}))
+	if bind.StatusCode != http.StatusCreated {
+		t.Fatalf("bind: %d %s", bind.StatusCode, bind.Body)
+	}
+	if under := interceptBearer(t, app, plain); under.Terminate {
+		t.Fatalf("under-limit: %+v", under)
+	}
+	_, err = app.HandleMethod(MethodUsageHandle, mustJSON(UsageHandleRequest{
+		APIKey: plain, Model: "gpt-4.1-mini", Provider: "openai-compatible",
+		Detail: UsageDetail{InputTokens: 1000},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = app.HandleMethod(MethodUsageHandle, mustJSON(UsageHandleRequest{
+		APIKey: plain, Model: "gpt-4.1-mini", Provider: "openai-compatible",
+		Detail: UsageDetail{InputTokens: 1000},
+	}))
+	over := interceptBearer(t, app, plain)
+	if !over.Terminate || over.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("over-limit: %+v", over)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(over.ResponseBody, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["error"].(map[string]any)["code"] != "daily_exceeded" {
+		t.Fatalf("429 body=%s", over.ResponseBody)
+	}
+	usageRaw, err := app.HandleMethod(MethodManagementHandle, mustJSON(ManagementRequest{
+		Method: http.MethodGet,
+		Path:   "/v0/management/plugins/" + PluginID + "/keys/usage",
+		Query:  map[string][]string{"id": {"cpamp"}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var usage ManagementResponse
+	decodeEnvelope(t, usageRaw, &usage)
+	var got map[string]any
+	if err := json.Unmarshal(usage.Body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if daily, _ := got["daily_usd"].(float64); daily < 1.9 {
+		t.Fatalf("daily_usd=%v want ~2", got["daily_usd"])
+	}
+}
+
 func TestQuotaPipeline(t *testing.T) {
 	app := configureApp(t)
 	hops := map[string]bool{}

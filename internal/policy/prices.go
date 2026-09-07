@@ -11,16 +11,16 @@ import (
 
 // ModelPrice is one Plus / Home billing_model_price row.
 type ModelPrice struct {
-	Provider                 string  `json:"provider"`
-	Model                    string  `json:"model"`
-	ServiceTier              string  `json:"service_tier"`
-	MinInputTokens           int64   `json:"min_input_tokens"`
-	InputPricePerMillion     float64 `json:"input_price_per_million"`
-	OutputPricePerMillion    float64 `json:"output_price_per_million"`
-	CacheReadPricePerMillion float64 `json:"cache_read_price_per_million"`
+	Provider                  string  `json:"provider"`
+	Model                     string  `json:"model"`
+	ServiceTier               string  `json:"service_tier"`
+	MinInputTokens            int64   `json:"min_input_tokens"`
+	InputPricePerMillion      float64 `json:"input_price_per_million"`
+	OutputPricePerMillion     float64 `json:"output_price_per_million"`
+	CacheReadPricePerMillion  float64 `json:"cache_read_price_per_million"`
 	CacheWritePricePerMillion float64 `json:"cache_write_price_per_million"`
-	RequestPrice             float64 `json:"request_price"`
-	Enabled                  bool    `json:"enabled"`
+	RequestPrice              float64 `json:"request_price"`
+	Enabled                   bool    `json:"enabled"`
 }
 
 // PriceLister fetches the current Plus model-price table.
@@ -90,7 +90,14 @@ func MatchPrice(prices []ModelPrice, provider, model, serviceTier string, inputT
 	return best, true
 }
 
-// HTTPPriceLister GETs Plus GET /v0/management/billing/model-prices.
+const (
+	cpampModelPricesPath = "/v0/management/model-prices"
+	homeModelPricesPath  = "/v0/management/billing/model-prices"
+)
+
+// HTTPPriceLister GETs CPA-Manager-Plus GET /v0/management/model-prices
+// (Bearer admin key). On HTTP 404 it falls back to Home/Plus
+// GET /v0/management/billing/model-prices.
 func HTTPPriceLister(client *http.Client, baseURL, managementKey string) PriceLister {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	managementKey = strings.TrimSpace(managementKey)
@@ -101,59 +108,121 @@ func HTTPPriceLister(client *http.Client, baseURL, managementKey string) PriceLi
 		if baseURL == "" {
 			return nil, fmt.Errorf("plus_base_url is empty")
 		}
-		req, err := http.NewRequest(http.MethodGet, baseURL+"/v0/management/billing/model-prices", nil)
+		code, body, err := getPricePath(client, baseURL+cpampModelPricesPath, managementKey)
 		if err != nil {
 			return nil, err
 		}
-		if managementKey != "" {
-			req.Header.Set("Authorization", "Bearer "+managementKey)
+		if code == http.StatusNotFound {
+			code, body, err = getPricePath(client, baseURL+homeModelPricesPath, managementKey)
+			if err != nil {
+				return nil, err
+			}
 		}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, err
-		}
-		defer resp.Body.Close()
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return nil, fmt.Errorf("plus model-prices: HTTP %d", resp.StatusCode)
+		if code < 200 || code >= 300 {
+			return nil, fmt.Errorf("plus model-prices: HTTP %d", code)
 		}
 		return ParseModelPrices(body)
 	}
 }
 
+func getPricePath(client *http.Client, url, managementKey string) (int, []byte, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	if managementKey != "" {
+		req.Header.Set("Authorization", "Bearer "+managementKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp.StatusCode, nil, err
+	}
+	return resp.StatusCode, body, nil
+}
+
 type wirePrice struct {
-	Provider                  string   `json:"provider"`
-	Model                     string   `json:"model"`
-	ServiceTier               string   `json:"service_tier"`
-	MinInputTokens            int64    `json:"min_input_tokens"`
-	InputPricePerMillion      float64  `json:"input_price_per_million"`
-	OutputPricePerMillion     float64  `json:"output_price_per_million"`
-	CacheReadPricePerMillion  float64  `json:"cache_read_price_per_million"`
-	CacheWritePricePerMillion float64  `json:"cache_write_price_per_million"`
-	RequestPrice              float64  `json:"request_price"`
-	Enabled                   *bool    `json:"enabled"`
+	Provider                  string  `json:"provider"`
+	Model                     string  `json:"model"`
+	ServiceTier               string  `json:"service_tier"`
+	MinInputTokens            int64   `json:"min_input_tokens"`
+	InputPricePerMillion      float64 `json:"input_price_per_million"`
+	OutputPricePerMillion     float64 `json:"output_price_per_million"`
+	CacheReadPricePerMillion  float64 `json:"cache_read_price_per_million"`
+	CacheWritePricePerMillion float64 `json:"cache_write_price_per_million"`
+	RequestPrice              float64 `json:"request_price"`
+	Enabled                   *bool   `json:"enabled"`
 }
 
 func ParseModelPrices(raw []byte) ([]ModelPrice, error) {
-	var wrapped struct {
-		Items       []wirePrice `json:"items"`
-		ModelPrices []wirePrice `json:"model_prices"`
+	var probe struct {
+		Prices      json.RawMessage `json:"prices"`
+		Items       []wirePrice     `json:"items"`
+		ModelPrices []wirePrice     `json:"model_prices"`
 	}
-	if err := json.Unmarshal(raw, &wrapped); err != nil {
+	if err := json.Unmarshal(raw, &probe); err != nil {
 		var list []wirePrice
 		if err2 := json.Unmarshal(raw, &list); err2 != nil {
 			return nil, err
 		}
 		return normalizeListedPrices(list), nil
 	}
-	list := wrapped.Items
+	if isJSONObject(probe.Prices) {
+		return parseCPAMPPrices(probe.Prices)
+	}
+	list := probe.Items
 	if len(list) == 0 {
-		list = wrapped.ModelPrices
+		list = probe.ModelPrices
 	}
 	return normalizeListedPrices(list), nil
+}
+
+func isJSONObject(raw json.RawMessage) bool {
+	s := strings.TrimSpace(string(raw))
+	return len(s) > 0 && s[0] == '{'
+}
+
+type cpampPrice struct {
+	Prompt       float64 `json:"prompt"`
+	Completion   float64 `json:"completion"`
+	Cache        float64 `json:"cache"`
+	CacheRead    float64 `json:"cacheRead"`
+	CacheWrite   float64 `json:"cacheWrite"`
+	RequestPrice float64 `json:"requestPrice"`
+}
+
+func parseCPAMPPrices(raw json.RawMessage) ([]ModelPrice, error) {
+	var m map[string]cpampPrice
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	out := make([]ModelPrice, 0, len(m))
+	for model, p := range m {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		cacheRead := p.CacheRead
+		if cacheRead == 0 {
+			cacheRead = p.Cache
+		}
+		out = append(out, ModelPrice{
+			Model:                     model,
+			ServiceTier:               "*",
+			MinInputTokens:            0,
+			InputPricePerMillion:      p.Prompt,
+			OutputPricePerMillion:     p.Completion,
+			CacheReadPricePerMillion:  cacheRead,
+			CacheWritePricePerMillion: p.CacheWrite,
+			RequestPrice:              p.RequestPrice,
+			Enabled:                   true,
+		})
+	}
+	return out, nil
 }
 
 func normalizeListedPrices(list []wirePrice) []ModelPrice {

@@ -59,6 +59,34 @@ func TestParseModelPricesEnabledDefaultsTrue(t *testing.T) {
 	}
 }
 
+func TestParseCPAMPPricesMap(t *testing.T) {
+	raw := []byte(`{"prices":{"deepseek-v4-flash":{"prompt":0.14,"completion":0.28,"cacheRead":0.0028}}}`)
+	list, err := ParseModelPrices(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 {
+		t.Fatalf("len=%d list=%+v", len(list), list)
+	}
+	got := list[0]
+	if got.Model != "deepseek-v4-flash" {
+		t.Fatalf("model=%q", got.Model)
+	}
+	if got.InputPricePerMillion != 0.14 || got.OutputPricePerMillion != 0.28 {
+		t.Fatalf("usd/M input=%v output=%v", got.InputPricePerMillion, got.OutputPricePerMillion)
+	}
+	if got.CacheReadPricePerMillion != 0.0028 {
+		t.Fatalf("cacheRead=%v", got.CacheReadPricePerMillion)
+	}
+	if !got.Enabled || got.ServiceTier != "*" {
+		t.Fatalf("enabled/tier %+v", got)
+	}
+	matched, ok := MatchPrice(list, "openai-compatible", "deepseek-v4-flash", "standard", 100)
+	if !ok || matched.InputPricePerMillion != 0.14 {
+		t.Fatalf("match %+v ok=%v", matched, ok)
+	}
+}
+
 func TestHTTPPriceLister(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v0/management/billing/model-prices" {
@@ -82,6 +110,43 @@ func TestHTTPPriceLister(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(list) != 1 || list[0].InputPricePerMillion != 1.25 {
+		t.Fatalf("list = %+v", list)
+	}
+}
+
+func TestHTTPPriceListerCPAMP(t *testing.T) {
+	var gotPath, gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotAuth = r.Header.Get("Authorization")
+		if r.URL.Path != "/v0/management/model-prices" {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer admin" {
+			http.Error(w, `{"error":"invalid admin key"}`, http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"prices": map[string]any{
+				"deepseek-v4-flash": map[string]any{
+					"prompt": 0.14, "completion": 0.28, "cacheRead": 0.0028,
+				},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	list, err := HTTPPriceLister(srv.Client(), srv.URL, "admin")()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/v0/management/model-prices" {
+		t.Fatalf("path=%q", gotPath)
+	}
+	if gotAuth != "Bearer admin" {
+		t.Fatalf("auth=%q", gotAuth)
+	}
+	if len(list) != 1 || list[0].Model != "deepseek-v4-flash" || list[0].InputPricePerMillion != 0.14 || list[0].OutputPricePerMillion != 0.28 {
 		t.Fatalf("list = %+v", list)
 	}
 }

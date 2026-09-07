@@ -90,8 +90,8 @@ func (a *App) registration() Registration {
 			ConfigFields: []ConfigField{
 				{Name: "enabled", Type: "boolean", Description: "Enable or disable this plugin without unloading it."},
 				{Name: "state_file", Type: "string", Description: "JSON state file for bound key policies and usage."},
-				{Name: "plus_base_url", Type: "string", Description: "Plus/CPA base URL used to fetch GET /v0/management/billing/model-prices."},
-				{Name: "plus_management_key", Type: "string", Description: "Management key for the Plus model-prices API. Leave empty to skip USD billing."},
+				{Name: "plus_base_url", Type: "string", Description: "CPA-Manager-Plus or Home/Plus base URL. Tries GET /v0/management/model-prices then GET /v0/management/billing/model-prices."},
+				{Name: "plus_management_key", Type: "string", Description: "Bearer token for the price API (manager-plus admin key, or Home/Plus management key). Leave empty to skip USD billing."},
 				{Name: "keys", Type: "array", Description: "Optional seed policies. State file wins after it exists."},
 			},
 		},
@@ -221,16 +221,16 @@ type keyWriteRequest struct {
 }
 
 type publicKey struct {
-	ID             string             `json:"id"`
-	Name           string             `json:"name"`
-	Enabled        bool               `json:"enabled"`
-	KeyPreview     string             `json:"key_preview"`
-	RPM            int                `json:"rpm"`
-	DailyLimitUSD  float64            `json:"daily_limit_usd"`
-	WeeklyLimitUSD float64            `json:"weekly_limit_usd"`
+	ID             string              `json:"id"`
+	Name           string              `json:"name"`
+	Enabled        bool                `json:"enabled"`
+	KeyPreview     string              `json:"key_preview"`
+	RPM            int                 `json:"rpm"`
+	DailyLimitUSD  float64             `json:"daily_limit_usd"`
+	WeeklyLimitUSD float64             `json:"weekly_limit_usd"`
 	Usage          policy.UsageSummary `json:"usage"`
-	CreatedAt      string             `json:"created_at,omitempty"`
-	UpdatedAt      string             `json:"updated_at,omitempty"`
+	CreatedAt      string              `json:"created_at,omitempty"`
+	UpdatedAt      string              `json:"updated_at,omitempty"`
 }
 
 func (a *App) bindKey(body []byte) ManagementResponse {
