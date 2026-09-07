@@ -1,4 +1,4 @@
-PLUGIN := cpa-key-policy
+PLUGIN := cpa-key-quota
 PKG := ./cmd/cpa-key-policy
 DIST := dist
 WEB := web

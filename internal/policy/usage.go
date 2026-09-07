@@ -291,31 +291,17 @@ func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	byAlias := make(map[string]AliasUsageEntry, len(key.Models))
-	for _, rule := range key.Models {
-		byAlias[rule.Alias] = AliasUsageEntry{
-			Alias:       rule.Alias,
-			Provider:    rule.Provider,
-			TargetModel: rule.TargetModel,
-			BillingMode: rule.BillingMode,
-			PerCallUSD:  rule.PerCallUSD,
-			InConfig:    true,
-		}
-	}
-
+	byAlias := make(map[string]AliasUsageEntry)
 	if st := l.entries[key.ID]; st != nil {
 		for alias, w := range st.ByAlias {
-			// Re-evaluate windows on a local copy so a stale weekly total resets
-			// for display without mutating the ledger.
 			l.ensureAliasWindowLocked(&w.Daily, true, now)
 			l.ensureAliasWindowLocked(&w.Weekly, false, now)
-			entry, ok := byAlias[alias]
-			if !ok {
-				entry = AliasUsageEntry{Alias: alias, InConfig: false}
+			byAlias[alias] = AliasUsageEntry{
+				Alias:    alias,
+				InConfig: true,
+				Daily:    w.Daily,
+				Weekly:   w.Weekly,
 			}
-			entry.Daily = w.Daily
-			entry.Weekly = w.Weekly
-			byAlias[alias] = entry
 		}
 	}
 

@@ -1,9 +1,9 @@
 {
-  "name": "cpa-key-policy-web",
+  "name": "cpa-key-quota-web",
   "private": true,
-  "version": "0.4.4",
+  "version": "0.5.0",
   "type": "module",
-  "description": "Management UI for the cpa-key-policy CLIProxyAPI plugin.",
+  "description": "Management UI for the cpa-key-quota CLIProxyAPI plugin.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

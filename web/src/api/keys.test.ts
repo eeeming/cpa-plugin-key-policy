@@ -1,41 +1,33 @@
 import { describe, it, expect } from "vitest";
-import { buildModelRules } from "./keys";
+import { quotaStatus } from "./keys";
+import type { KeyPublic } from "../types";
 
-describe("buildModelRules", () => {
-  it("maps alias = target_model and lowercases provider", () => {
-    const rules = buildModelRules([
-      { provider: "Codex", model: "gpt-5-codex" },
-      { provider: "Claude", model: "claude-sonnet-4" },
-    ]);
-    expect(rules).toEqual([
-      { alias: "gpt-5-codex", provider: "codex", target_model: "gpt-5-codex" },
-      { alias: "claude-sonnet-4", provider: "claude", target_model: "claude-sonnet-4" },
-    ]);
-  });
+function key(over: Partial<KeyPublic> = {}): KeyPublic {
+  const usage = {
+    daily_usd: 0,
+    weekly_usd: 0,
+    daily_limit_usd: 1,
+    weekly_limit_usd: 10,
+    ...(over.usage ?? {}),
+  };
+  return {
+    id: "a",
+    name: "a",
+    enabled: true,
+    key_preview: "sk-...a",
+    rpm: 0,
+    daily_limit_usd: 1,
+    weekly_limit_usd: 10,
+    ...over,
+    usage,
+  };
+}
 
-  it("dedupes identical provider/model pairs", () => {
-    const rules = buildModelRules([
-      { provider: "codex", model: "gpt-5" },
-      { provider: "CODEX", model: "GPT-5" },
-    ]);
-    expect(rules).toHaveLength(1);
-  });
-
-  it("skips empty provider or model", () => {
-    const rules = buildModelRules([
-      { provider: "", model: "x" },
-      { provider: "p", model: "" },
-      { provider: "p", model: "ok" },
-    ]);
-    expect(rules).toEqual([
-      { alias: "ok", provider: "p", target_model: "ok" },
-    ]);
-  });
-
-  it("trims whitespace", () => {
-    const rules = buildModelRules([{ provider: "  codex  ", model: "  gpt-5  " }]);
-    expect(rules).toEqual([
-      { alias: "gpt-5", provider: "codex", target_model: "gpt-5" },
-    ]);
+describe("quotaStatus", () => {
+  it("reports disabled, daily, weekly, and ok", () => {
+    expect(quotaStatus(key({ enabled: false }))).toBe("disabled");
+    expect(quotaStatus(key({ usage: { daily_usd: 1, weekly_usd: 0, daily_limit_usd: 1, weekly_limit_usd: 10 } }))).toBe("daily");
+    expect(quotaStatus(key({ usage: { daily_usd: 0, weekly_usd: 10, daily_limit_usd: 1, weekly_limit_usd: 10 } }))).toBe("weekly");
+    expect(quotaStatus(key())).toBe("ok");
   });
 });

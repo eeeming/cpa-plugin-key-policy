@@ -1,6 +1,6 @@
 // Package web embeds the built management UI (a single inlined index.html)
 // and serves it as a CPA plugin resource under
-// /v0/resource/plugins/cpa-key-policy/index.html.
+// /v0/resource/plugins/cpa-key-quota/index.html.
 //
 // dist/index.html is a build artifact produced by `npm run build` in ../../web.
 // A placeholder is committed so the Go build never fails when the frontend has

@@ -1,34 +1,14 @@
-# Example CLIProxyAPI snippet for cpa-key-policy.
-# Replace placeholders. Do not commit real secrets or production hosts.
+# Example CLIProxyAPI snippet for cpa-key-quota.
+# Bind existing Plus api-keys. Do not put plugin-issued keys into api-keys.
 
 plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cpa-key-policy:
+    cpa-key-quota:
       enabled: true
       priority: 10
-      # Runtime source of truth once created (keys, aliases, classify rules, usage).
-      state_file: "cpa-key-policy-state.json"
-
-      # Prefer creating keys/aliases/classify rules via Web UI or Management API.
-      # Seed keys below are mainly for first boot when state_file does not exist.
-      keys:
-        - id: "team-a"
-          name: "Team A"
-          enabled: true
-          key_hash: "sha256:replace-with-hash"
-          key_preview: "cpa_abc...xyz"
-          rpm: 60
-          # Either bind models directly…
-          models:
-            - alias: "fast"
-              provider: "codex"
-              target_model: "gpt-5.4-mini"
-              group: "free" # built-in tier; custom groups use classify:name
-            - alias: "compat-demo"
-              provider: "cerebras" # openai-compatibility channel name
-              target_model: "gpt-oss-120b"
-          # …or reference global aliases created in the UI / POST /aliases:
-          # aliases:
-          #   - alias: "cheap-chat"
+      state_file: "cpa-key-quota-state.json"
+      # Plus/Home model-prices (optional). Empty = RPM only, no USD limits.
+      plus_base_url: "http://127.0.0.1:8317"
+      plus_management_key: "replace-with-management-key"

@@ -2,6 +2,7 @@ package policy
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -53,5 +54,22 @@ func TestExtractAPIKey(t *testing.T) {
 func TestPreviewKey(t *testing.T) {
 	if got := PreviewKey("cpa_abcdefghijklmnopqrstuvwxyz"); got != "cpa_abc...vwxyz" {
 		t.Fatalf("PreviewKey() = %q", got)
+	}
+}
+
+func TestCallerScopeIsSalted(t *testing.T) {
+	scope := CallerScope("downstream-secret")
+	if scope == "" || scope == "downstream-secret" {
+		t.Fatalf("scope = %q", scope)
+	}
+	hash, err := HashKey("downstream-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scope == hash || scope == strings.TrimPrefix(hash, HashPrefix) {
+		t.Fatal("caller_scope must not equal HashKey")
+	}
+	if CallerScope("downstream-secret") != scope {
+		t.Fatal("CallerScope must be stable")
 	}
 }

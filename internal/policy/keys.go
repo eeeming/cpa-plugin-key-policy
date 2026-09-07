@@ -1,10 +1,8 @@
 package policy
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,12 +14,17 @@ const HashPrefix = "sha256:"
 
 var ErrUnknownKey = errors.New("unknown key")
 
-func GenerateKey() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
+const callerScopePrefix = "cli-proxy-api:caller-scope:v1\x00"
+
+// CallerScope matches CPA's irreversible downstream-key namespace
+// (sha256("cli-proxy-api:caller-scope:v1\x00" + principal)).
+func CallerScope(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
 	}
-	return "cpa_" + base64.RawURLEncoding.EncodeToString(buf), nil
+	sum := sha256.Sum256([]byte(callerScopePrefix + value))
+	return hex.EncodeToString(sum[:])
 }
 
 func HashKey(key string) (string, error) {
