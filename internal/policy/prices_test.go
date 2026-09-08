@@ -117,6 +117,15 @@ func TestParseCPAMPPricesExpandsContextAndServiceTiers(t *testing.T) {
 	if !ok || justUnder.InputPricePerMillion != 5 {
 		t.Fatalf("at threshold stays base = %+v ok=%v", justUnder, ok)
 	}
+	// Plus: long-context wildcard wins over priority (no stacking).
+	longPrio, ok := MatchPlusPrice(list, "openai", "gpt-5.6-sol", "", "priority", 272001)
+	if !ok || longPrio.MinInputTokens != 272001 || longPrio.OutputPricePerMillion != 45 {
+		t.Fatalf("priority+long should use context 45 not priority 60: %+v ok=%v", longPrio, ok)
+	}
+	shortPrio, ok := MatchPlusPrice(list, "openai", "gpt-5.6-sol", "", "priority", 1000)
+	if !ok || shortPrio.OutputPricePerMillion != 60 {
+		t.Fatalf("short priority = %+v ok=%v", shortPrio, ok)
+	}
 }
 
 func TestHTTPPriceLister(t *testing.T) {

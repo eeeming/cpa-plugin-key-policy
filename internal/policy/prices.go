@@ -90,6 +90,30 @@ func MatchPrice(prices []ModelPrice, provider, model, serviceTier string, inputT
 	return best, true
 }
 
+// MatchPlusPrice follows Plus costForPriceWithServiceTier: a long-context
+// wildcard band (min_input_tokens > 0) wins over service-tier / priority
+// prices. Otherwise exact service_tier, then `*`. Tries model then alias.
+func MatchPlusPrice(prices []ModelPrice, provider, model, alias, serviceTier string, inputTokens int64) (ModelPrice, bool) {
+	try := func(name string) (ModelPrice, bool) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return ModelPrice{}, false
+		}
+		context, ok := MatchPrice(prices, provider, name, "*", inputTokens)
+		if ok && context.MinInputTokens > 0 {
+			return context, true
+		}
+		return MatchPrice(prices, provider, name, serviceTier, inputTokens)
+	}
+	if rule, ok := try(model); ok {
+		return rule, true
+	}
+	if strings.TrimSpace(alias) != "" && !strings.EqualFold(alias, model) {
+		return try(alias)
+	}
+	return ModelPrice{}, false
+}
+
 const (
 	cpampModelPricesPath = "/v0/management/model-prices"
 	homeModelPricesPath  = "/v0/management/billing/model-prices"

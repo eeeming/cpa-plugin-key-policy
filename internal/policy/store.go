@@ -282,10 +282,7 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model, provider, serviceTier stri
 	var cost, cacheCost float64
 	var cacheReadTokens, nonCacheInput int64
 	if prices, ok := s.cachedPrices(); ok {
-		rule, matched := MatchPrice(prices, provider, model, serviceTier, detail.InputTokens)
-		if !matched && strings.TrimSpace(alias) != "" && !strings.EqualFold(alias, model) {
-			rule, matched = MatchPrice(prices, provider, alias, serviceTier, detail.InputTokens)
-		}
+		rule, matched := MatchPlusPrice(prices, provider, model, alias, serviceTier, detail.InputTokens)
 		if matched {
 			cost, cacheCost, cacheReadTokens = ComputeCacheCostBreakdown(
 				provider,
