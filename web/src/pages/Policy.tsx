@@ -156,7 +156,7 @@ function BindModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <form className="card" style={{ maxWidth: 480, margin: "10vh auto" }} onClick={(e) => e.stopPropagation()} onSubmit={(e) => void submit(e)}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => void submit(e)}>
         <h2>{title}</h2>
         <div className="form-row">
           <label>{t("bind.name")}</label>
@@ -177,13 +177,15 @@ function BindModal({
             {existing ? t("bind.keyRotateHint") : t("bind.keyHint")}
           </div>
         </div>
-        <div className="form-row">
-          <label>{t("bind.daily")}</label>
-          <input className="input" value={daily} onChange={(e) => setDaily(e.target.value)} />
-        </div>
-        <div className="form-row">
-          <label>{t("bind.weekly")}</label>
-          <input className="input" value={weekly} onChange={(e) => setWeekly(e.target.value)} />
+        <div className="row2">
+          <div className="form-row">
+            <label>{t("bind.daily")}</label>
+            <input className="input" value={daily} onChange={(e) => setDaily(e.target.value)} />
+          </div>
+          <div className="form-row">
+            <label>{t("bind.weekly")}</label>
+            <input className="input" value={weekly} onChange={(e) => setWeekly(e.target.value)} />
+          </div>
         </div>
         <div className="form-row">
           <label>{t("bind.rpm")}</label>
