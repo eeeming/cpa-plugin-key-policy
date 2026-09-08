@@ -204,22 +204,6 @@ func toInt(v any) int {
 	return 0
 }
 
-// PriceForAlias looks up the configured per-million-token prices for an alias
-// on this key. Returns ok=false when the alias has no rule (unknown alias) —
-// callers treat unknown aliases as zero-cost (billed at 0, not blocked).
-func (k *KeyConfig) PriceForAlias(alias string) (inputPerMillion, outputPerMillion, cacheReadPerMillion float64, ok bool) {
-	alias = strings.TrimSpace(alias)
-	if alias == "" {
-		return 0, 0, 0, false
-	}
-	for _, rule := range k.Models {
-		if strings.EqualFold(rule.Alias, alias) {
-			return rule.InputPricePerMillion, rule.OutputPricePerMillion, rule.CacheReadPricePerMillion, true
-		}
-	}
-	return 0, 0, 0, false
-}
-
 // ComputeCost converts token usage into a dollar amount using the alias's prices.
 // Prices are USD per 1M tokens; cost = (tokens / 1_000_000) * price.
 // Unknown alias (ok=false) → 0 cost (unpriced requests are not billed).

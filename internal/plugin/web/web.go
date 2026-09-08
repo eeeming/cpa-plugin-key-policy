@@ -1,6 +1,6 @@
 // Package web embeds the built management UI (a single inlined index.html)
 // and serves it as a CPA plugin resource under
-// /v0/resource/plugins/cpa-key-policy/index.html.
+// /v0/resource/plugins/cpa-key-quota/index.html.
 //
 // dist/index.html is a build artifact produced by `npm run build` in ../../web.
 // A placeholder is committed so the Go build never fails when the frontend has
@@ -28,5 +28,10 @@ func Serve(path string) (status int, headers http.Header, body []byte) {
 	if strings.TrimRight(path, "/") != IndexPath {
 		return http.StatusNotFound, http.Header{"Content-Type": []string{"text/plain; charset=utf-8"}}, []byte("not found")
 	}
-	return http.StatusOK, http.Header{"Content-Type": []string{contentType}}, indexHTML
+	headers = http.Header{
+		"Content-Type":            []string{contentType},
+		"X-Frame-Options":         []string{"SAMEORIGIN"},
+		"Content-Security-Policy": []string{"frame-ancestors 'self'"},
+	}
+	return http.StatusOK, headers, indexHTML
 }

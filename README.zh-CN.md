@@ -1,247 +1,198 @@
-# cpa-key-policy（中文说明）
+# cpa-key-quota
 
-面向 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 的**下游 API Key 策略插件**。
+给 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) 用的「按客户端 Key 限额」插件。
 
-用人话说：你可以给客户发自己的 `cpa_…` 钥匙。每把钥匙只能用你允许的模型，还能限速、限额，并转到 CPA 真实上游（Codex、Claude、openai-compatibility 通道等）。CPA 自带的 `api-keys` 仍可留给管理员；**不要把插件下发的 key 再写进 `api-keys`**，否则会绕过本插件策略。
+它**不签发** Key，也不替代 Plus 鉴权。绑定的是已经在 Plus `api-keys` 里的 Key。**美元金额按 CPA-Manager-Plus 的价目表记账**（本插件自己没有价表）。绑定且启用的策略超过日/周 USD 或 RPM 时返回 HTTP 429。未绑定或已停用的策略零动作（Plus 照常放行）。
 
 | | |
 |---|---|
-| **仓库** | [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) |
-| **协议** | MIT |
-| **安装** | [CLIProxyAPI 插件商店](https://github.com/router-for-me/CLIProxyAPI-Plugins-Store) 或自行编译 |
+| **插件 ID** | `cpa-key-quota` |
+| **许可证** | MIT |
 | **English** | [README.md](./README.md) |
 
----
+## 环境
 
-## 它能干什么
+- 能 `dlopen` c-shared `.so` 的 CLIProxyAPI v7 宿主。用 glibc 镜像，例如 `eceasy/cli-proxy-api`。Alpine / `CGO_ENABLED=0` 的宿主加载不了本插件。
+- Linux `amd64` 或 `arm64`，且与 CPA 宿主架构一致（`CGO_ENABLED=1`）。
+- **USD 限额依赖 CPA-Manager-Plus**。插件读取 Plus `GET /v0/management/model-prices`，按该表记账。没有 Plus 时 RPM 仍然有效。
 
-1. **发钥匙** — 批量创建下游 key，每把绑定可用模型 / 别名。  
-2. **做映射** — 客户端写 `model: fast`，插件转到例如 `codex` + `gpt-5.4-mini`。  
-3. **做限制** — 单 key 的 RPM、可选每日/每周美元额度，按 token 或按次计费。  
-4. **凭证分档 / 归类** — 请求可以钉死在 Codex free/team 等内置档，或你自定义的归类组，**不会串到别的凭证文件**。  
-5. **多目标别名** — 一个别名挂多个后端（优先 或 轮询）。  
-6. **网页管理** — 在 CPA 里管 key、全局别名、凭证归类。  
+**不要**声明 `frontend_auth_provider`。超限必须 `Terminate` 429，不能靠 `Authenticated: false`。
 
----
+## 部署
 
-## 核心概念
+插件是 CPA `dlopen` 的 `.so`。常见布局：CPA 与 CPA-Manager-Plus 在同一 Docker 网络，`.so` bind-mount 进 CPA 的 `plugins/`。
 
-### 下游 Key
+### 1. 构建 `.so`
 
-插件自己发的密钥（`cpa_…`），只由本插件鉴权。上面可以配置：
-
-- 允许的 **模型** 和/或 **别名**
-- RPM
-- 每日 / 每周美元上限（可选）
-- 是否允许主端口访问 `/v1/models`（见下文）
-
-### 别名（全局映射表）
-
-可复用的名字，例如 `fast`，展开成一条或多条 **目标**：
-
-| 字段 | 含义 |
-|------|------|
-| `provider` | CPA 提供商标识（`codex`、`claude`，或 openai-compatibility 的 **name**，如 `cerebras`） |
-| `target_model` | 上游真实模型 id |
-| `group` | 可选，限制用哪一类凭证（见下节） |
-| `dispatch` | `priority`（始终尝试第一个）或 `round-robin`（轮询） |
-| 计费 | `tokens`（百万 token 单价）或 `per_call`（每次固定金额） |
-
-Key 可以**引用**别名，不必重复填目标。多目标别名会展开成多条同名规则；**同一次请求**里鉴权与路由共用同一次选择，保证 `group` 与真实目标一致。
-
-### 凭证组：内置档位 + 自定义归类
-
-| 类型 | 选择器里长什么样 | 写进映射的 group |
-|------|------------------|------------------|
-| **内置档**（Codex `plan_type`、Antigravity `tier`） | 如「免费档 / Team」 | 裸名：`free`、`team`、`supported` |
-| **自定义归类** | 如 **「自定义 · vip」** | 带前缀：`classify:vip` |
-
-**运行时规则：** 映射里写了 group，调度就**只**在该组凭证里选文件。没有可用文件 → 直接失败（`auth_not_found`），**绝不**偷偷落到其他档。
-
-**自定义归类**（网页 → 映射 → 凭证归类）：
-
-- 用正则匹配凭证字段（`filename`、`provider`、`plan_type`、`tier` 等）。
-- 规则上保存你起的**组名**（裸名）。
-- 目录与映射使用 `classify:组名`，避免和内置的 `free`/`team` 撞名。
-- 一个文件可命中**多个**自定义组（选择器里每组都会出现）。
-- 没命中自定义规则 → Codex/Antigravity 走内置档；其它 auth-file 渠道默认扁平（无组）。
-- openai-compat / API Key 类通道保持**扁平**，不拆组。
-
-一般在网页或管理 API 配置即可，不必手改 state JSON。
-
-### openai-compatibility 通道
-
-CPA 里配置的兼容通道，映射时 `provider` 填通道 **name**。插件路由时会对应到主机内部的 `openai-compatible-<name>`。通道配置里的 **models 列表要写全**，否则主机会报「该模型无可用 auth」。
-
----
-
-## 插件能力一览
-
-| 钩子 | 作用 |
-|------|------|
-| 前端鉴权 | 识别插件 key；校验别名、RPM、额度；写入路由与 group 元数据 |
-| 模型路由 | 别名 → provider + 目标模型 |
-| 调度 | 有 group 时按档位 / `classify:` 过滤凭证 |
-| 响应拦截 | 非流式 JSON：把顶层 `model` 改回别名 |
-| 用量 | token / 按次计费写入 state |
-| 管理 API + 内嵌网页 | Key、别名、归类、状态 |
-
----
-
-## 编译
-
-Linux `.so` 需要 cgo：
+在与 CPA 同架构的 Linux 上：
 
 ```bash
-make test
-make build-linux          # 先编前端，再编 linux amd64/arm64 .so
-# 或
-make web-build
-GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
-  -buildmode=c-shared -o dist/cpa-key-policy_linux_amd64.so ./cmd/cpa-key-policy
+make build-linux-amd64   # 或：make build-linux-arm64
 ```
 
-Windows 上请用 WSL/Linux 编 `.so`。`go test ./...` 可用非 cgo stub，不依赖动态库工具链。
+产物：`dist/cpa-key-quota_linux_<arch>.so`。
 
-把 `.so` 放进 CPA 的 `plugins.dir`，并在配置里启用插件。
+本机是 macOS（或架构与 CPA 不同）时用 Docker 交叉编译。CPA 是 x86_64 就必须编 `linux/amd64`，即使笔记本是 ARM：
 
----
+```bash
+docker build --platform linux/amd64 -f e2e/Dockerfile.plugin -t cpa-key-quota-so:amd64 .
+cid=$(docker create --platform linux/amd64 cpa-key-quota-so:amd64)
+mkdir -p dist
+docker cp "$cid":/cpa-key-quota.so dist/cpa-key-quota_linux_amd64.so
+docker rm "$cid"
+file dist/cpa-key-quota_linux_amd64.so   # 必须是：ELF 64-bit LSB shared object, x86-64
+```
+
+ARM 的 CPA 用 `--platform linux/arm64` 和 `cpa-key-quota_linux_arm64.so`。不要把 ARM 的 `.so` 拷到 amd64 宿主（反之亦然），CPA 会加载失败。
+
+### 2. 安装文件
+
+拷到 CPA 会加载的目录（`config.yaml` 里的 `plugins`，常见挂载为 `/CLIProxyAPI/plugins`）：
+
+```text
+plugins/linux/amd64/cpa-key-quota.so
+```
+
+ARM 宿主用 `plugins/linux/arm64/cpa-key-quota.so`。
+
+### 3. 指向 CPA-Manager-Plus
+
+把 [配置](#配置) 里的片段写入 CPA 的 `config.yaml`。`plus_base_url` 必须是 **CPA 容器里能访问到的 Plus 地址**（Docker DNS，不要填公网域名），例如 `http://cpa-manager-plus:18317`。`plus_management_key` 是 **Plus 的 admin key**（`CPA_MANAGER_ADMIN_KEY`），用来读价表，以及 **同步** 时读 Plus `api-keys`。它不是 CPA 的 `remote-management.secret-key`。
+
+这两项配好、且 Plus 里已有模型价格之后，USD 限额才会生效。见 [价目表](#价目表)。
+
+### 4. 重启 CPA
+
+`plugins/` 经常是只读挂载。只覆盖 `.so` 不够，必须重启 CPA 进程才会 `dlopen` 新文件：
+
+```bash
+docker restart cli-proxy-api
+```
+
+只更新插件时，不必重启 Plus 或反向代理。
+
+### 5. 验收
+
+用 CPA 的 management key：
+
+```http
+GET /v0/management/plugins
+GET /v0/management/plugins/cpa-key-quota/status
+```
+
+期望 `cpa-key-quota` 为 `registered: true`、`effective_enabled: true`；Plus 返回价表后 `prices_available: true`。CPA 日志应有 `plugin loaded plugin_id=cpa-key-quota path=plugins/linux/<arch>/cpa-key-quota.so`。
+
+管理界面嵌在 `/v0/resource/plugins/cpa-key-quota/index.html`（Plus 面板菜单 **Key Quota**）。
+
+以后发新版本：重新构建、覆盖同一路径的 `.so`、只重启 CPA。
+
+## 价目表
+
+**USD 记账依赖 CPA-Manager-Plus。** 本插件不自带、也不提供编辑价表的界面。改价去 Plus，插件只读。
+
+| | |
+|---|---|
+| **依赖服务** | CPA-Manager-Plus（compose 里常见 `seakee/cpa-manager-plus`） |
+| **接口** | `GET {plus_base_url}/v0/management/model-prices`，Bearer `plus_management_key` |
+| **回退** | 该路径 HTTP 404 时再试 `GET …/v0/management/billing/model-prices`（Home / 旧版 Plus） |
+| **没有 Plus** | `plus_base_url` 为空，或还没有任何价表：USD 门关闭。RPM 仍有效。 |
+
+价表缓存 30 秒。之后拉取失败会保留上一次成功的表，避免 USD 限额被打掉。没有按模型家族写死费率（例如不会特判 GPT-5/6）：Plus 列表里出现的名字就会按该表记账。
 
 ## 配置
 
-最小形态（完整示例见 [`config.example.yaml`](./config.example.yaml)）：
+完整示例见 [`config.example.yaml`](config.example.yaml)。最少片段：
 
 ```yaml
 plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cpa-key-policy:
+    cpa-key-quota:
       enabled: true
       priority: 10
-      state_file: "cpa-key-policy-state.json"
+      state_file: "cpa-key-quota-state.json"
+      plus_base_url: "http://cpa-manager-plus:18317"
+      plus_management_key: "your-plus-admin-key"
 ```
 
-说明：
+| 字段 | 作用 |
+|---|---|
+| `enabled` | 不卸载插件的情况下暂停限额 |
+| `state_file` | 绑定策略和用量的 JSON（不存在会创建，权限 600） |
+| `plus_base_url` | CPA-Manager-Plus 地址（建议 Docker 内网）。见 [价目表](#价目表) |
+| `plus_management_key` | Plus admin 的 Bearer，用于价表以及 **同步**（`GET /v0/management/api-keys`） |
+| `keys` | 可选种子。状态文件一旦存在，以文件为准 |
 
-- 若已有 `state_file`，则以其中的 keys / 别名 / 归类 / 用量为准。
-- 日常请用**网页**或管理 API 建 key 和别名；YAML 种子数据主要用于首次启动。
-- 公开文档里不要写真实管理密钥、主机名或凭证内容。
+用量在内存里累计，大约每 15 秒原子写入状态文件（临时文件 + rename）。
 
----
+## 绑定与同步
 
-## 网页管理界面
+**绑定**（界面 **新增**，或 API）：把已有 Plus Key 的**明文提交一次**。插件只存 `sha256:`、截断 preview、CPA `caller_scope`。明文不落盘，列表/status JSON 也不返回明文。
 
-插件内嵌。加载后访问：
+```http
+POST /v0/management/plugins/cpa-key-quota/keys
+Authorization: Bearer <CPA remote-management secret-key>
+Content-Type: application/json
 
-```text
-http://<你的-cpa-主机>:<api端口>/v0/resource/plugins/cpa-key-policy/index.html
+{"id":"k-team","name":"team","key":"sk-...","daily_limit_usd":0.5,"weekly_limit_usd":0,"rpm":0}
 ```
 
-用 CPA **管理密钥**登录（`remote-management.secret-key` 或管理密码）。密钥只放在内存，不写 `localStorage`；刷新页面需重新登录。
+限额填 `0` 表示不限。同一路径 PATCH 可改限额、改名、启用/停用，或再贴明文换绑（立刻哈希）。
 
-| 区域 | 用途 |
-|------|------|
-| Keys | 创建/编辑/轮换/删除 key；绑模型或别名；RPM 与额度 |
-| 映射 → 别名 | 全局多目标别名、调度方式、定价 |
-| 映射 → 凭证归类 | 自定义分组规则与命中预览 |
-| 选模型 | 提供商目录；内置档 / **自定义 · …** 子组 |
+**从 Plus 同步**（**同步**）：`POST /v0/management/plugins/cpa-key-quota/keys/sync` 拉取 Plus `GET /v0/management/api-keys`，把尚未绑定的 Key 加进来。已有名称/限额/启用状态不覆盖。新 Key 默认启用且不限额。Plus 目前只返回明文字符串、**没有显示名**，同步后的名字是 preview，可在 **编辑** 里改。
 
-不重编 `.so` 时开发前端：
+停用（`enabled: false`）只暂停限额，Plus 侧 Key 仍可用。解绑只删插件策略。从 Plus `api-keys` 删掉才会 401。
 
-```bash
-cd web
-npm install
-VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
+## 滚动窗口
+
+日/周 USD 都是**滚动窗口**，不是自然日/自然周：
+
+- 日：该 Key 本窗口第一笔计费起 24 小时，到期整窗清零
+- 周：第一笔计费起 7×24 小时，到期整窗清零
+
+卡片上显示下次重置时间。尚未计费显示「首次计费后起算」。列表按最后一次请求排序，最近用过的在最前。
+
+## 客户端错误
+
+HTTP **429**，OpenAI 形状的 `error`：
+
+| 门控 | `error.type` / `error.code` | 说明 |
+|---|---|---|
+| 日或周 USD | `insufficient_quota` | message 里区分 daily / weekly |
+| RPM | `rate_limit_exceeded` | `Retry-After: 60` |
+
+未绑定、已停用的 Key 不会被本插件 429。
+
+## 请求路径
+
+```
+客户端 Key
+  → Plus api-keys 鉴权
+  → request.intercept_before
+       ├ 未绑定 / 策略停用 → 零动作
+       └ 已绑定且启用
+            ├ 超 RPM / 日 / 周 USD → Terminate 429
+            └ 否则放行；usage.handle 按 Plus 价表记账
 ```
 
----
+## 隐私
 
-## 管理 API 摘要
+- **每把 Key 落盘：** 密钥的 `sha256:`、截断 preview、`caller_scope`、限额、用量。没有明文。
+- **管理界面会话：** CPA management key 只放在内存（刷新页面需重新登录）。若在官方面板 iframe 里且勾了「记住密码」，可能复用面板已有的 `localStorage`；本插件自己不会写入该 key。
+- **Plus 同步/价表：** `plus_management_key` 能列出明文 `api-keys`，按宿主密钥保管。插件在内存里哈希，不把这些字符串写入状态文件。`plus_base_url` 建议用 HTTPS 或 Docker 内网（compose 里常见 `http://` 回环）。公网明文 URL 会把 admin key 和全部 api-keys 打到网上。
+- **状态文件：** CPA 进程能写到的路径（由运营配置），权限 600，不要提交 git。
+- **管理 API：** `/v0/management/plugins/cpa-key-quota/*` 的鉴权在 **CPA 宿主**，插件自己不再验一次。没有 secret-key 不要把这些路径暴露出去。
+- **界面嵌入：** 资源页带 `Content-Security-Policy: frame-ancestors 'self'`；只有父页面同源时才会复用面板「记住密码」的 key。
+- **价表失败：** Plus 拉取失败时保留上一次成功的价表，避免 USD 限额被打掉。还没有任何价表时 USD 门关闭，RPM 仍有效。
 
-路径为精确匹配。鉴权：CPA 管理 Bearer。
-
-**Key：** `GET/POST/PATCH/DELETE …/keys`，以及 `rotate` / `reset-rpm` / `usage` / `status`  
-
-**别名：** `GET/POST/DELETE …/aliases`  
-
-**归类：**  
-
-- `…/classify-rules`（含 reorder）  
-- `POST …/classify-preview` — 预览组 → 凭证 id（组名为规则裸名）  
-- `POST …/catalog` — 前端提交 auth-file + 模型列表，返回带 `classify:` 的选择器条目  
-
-创建 key（`plain_key` **只返回一次**）：
-
-```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/keys" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "team-a",
-    "name": "Team A",
-    "rpm": 60,
-    "models": [
-      {"alias":"fast","provider":"codex","target_model":"gpt-5.4-mini","group":"free"}
-    ]
-  }'
-```
-
-多目标别名示例：
-
-```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/aliases" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "alias": "cheap-chat",
-    "dispatch": "priority",
-    "billing_mode": "tokens",
-    "targets": [
-      {"provider":"cerebras","target_model":"gpt-oss-120b"},
-      {"provider":"codex","target_model":"gpt-5.4-mini","group":"free"}
-    ]
-  }'
-```
-
----
-
-## 客户端请求行为
-
-| 情况 | 结果 |
-|------|------|
-| 认识的 key + 允许的别名 | 鉴权通过 → 路由 → 可选 group 过滤 → 上游 |
-| 不允许的模型名 | 鉴权失败 |
-| 超 RPM / 额度 | 拒绝 |
-| 写了 group 但组内无可用凭证 | `auth_not_found` / 不可用（不串档） |
-| 不认识的 key | 插件放弃，CPA 可尝试原生 `api-keys` |
-| 非流式对话响应 | 顶层 `model` 改回别名 |
-| 流式 | v1 不改写 body |
-
-### 主端口的 `/v1/models`
-
-每 key 的 `allow_models_endpoint` 是**开关**：拒绝（401）或看**全局完整列表**。主端口无法按插件 key 过滤列表。
-
-
----
-
-## 上手清单
-
-1. 编译/安装 `.so` 到 CPA `plugins.dir`。  
-2. 启用 `plugins` 与 `cpa-key-policy`，配置 `state_file`。  
-3. 用管理密钥打开网页 UI。  
-4. （可选）配置**凭证归类**规则。  
-5. 建**别名**（多目标/定价）和/或给 key 勾选模型（含档位或「自定义 · …」）。  
-6. 创建 key，保存一次性 `plain_key`，发给客户。  
-7. 客户：OpenAI 兼容 base URL = CPA；`Bearer cpa_…`；`model` = 别名。  
-8. openai-compat 通道务必声明 models，否则会「无 auth」。
-
----
+已知且接受的边界：Plus 自己的 `GET /v0/management/api-keys` 会返回明文。本插件改不了这个接口。
 
 ## 测试
 
 ```bash
-go test ./...
-cd web && npm test && npm run build
+go test ./internal/policy/ ./internal/plugin/
+cd web && npm test
 ```
 
+Docker：`make e2e-docker`（Home 价表）、`make e2e-plus`（CPA-Manager-Plus）。说明见 [e2e/README.md](e2e/README.md)。

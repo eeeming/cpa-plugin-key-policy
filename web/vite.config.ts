@@ -6,10 +6,10 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 const cpaBase = process.env.VITE_CPA_BASE ?? "http://127.0.0.1:8317";
 
 // When hosted inside CPA, the app is served at
-// /v0/resource/plugins/cpa-key-policy/index.html. Production builds must use
+// /v0/resource/plugins/cpa-key-quota/index.html. Production builds must use
 // that base so inlined asset URLs resolve. In dev we keep "/" for convenience.
 const base = process.env.VITE_HOSTED === "1"
-  ? "/v0/resource/plugins/cpa-key-policy/"
+  ? "/v0/resource/plugins/cpa-key-quota/"
   : "/";
 
 export default defineConfig({

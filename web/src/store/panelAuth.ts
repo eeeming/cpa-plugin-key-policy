@@ -92,12 +92,16 @@ export function deobfuscateData(payload: string): string {
   }
 }
 
-// True when this page is running inside an iframe (the panel embeds us here).
+// True only when this page is iframed by the *same origin* (official CPA panel).
+// Cross-origin parents must not reuse cli-proxy-auth: comparing self!==top does
+// not throw across origins; reading top.location.origin does.
 export function isEmbedded(): boolean {
   try {
-    return window.self !== window.top;
+    if (window.self === window.top) {
+      return false;
+    }
+    return window.top !== null && window.top.location.origin === window.location.origin;
   } catch {
-    // Cross-origin access to window.top throws → treat as not-embedded/safe.
     return false;
   }
 }

@@ -1,0 +1,44 @@
+services:
+  cli-proxy-api:
+    image: eceasy/cli-proxy-api:latest
+    container_name: cli-proxy-api
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8317:8317"
+    volumes:
+      - ./config.yaml:/CLIProxyAPI/config.yaml
+      - ./auth-dir:/root/.cli-proxy-api
+      - ./plugins:/CLIProxyAPI/plugins:ro
+      - ./data:/CLIProxyAPI/data
+
+  cpa-manager-plus:
+    image: seakee/cpa-manager-plus:latest
+    container_name: cpa-manager-plus
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      - cli-proxy-api
+    ports:
+      - "127.0.0.1:18317:18317"
+    volumes:
+      - ./cpa-manager-plus-data:/data
+    environment:
+      HTTP_ADDR: "0.0.0.0:18317"
+      USAGE_DB_PATH: "/data/usage.sqlite"
+      CPA_MANAGER_ADMIN_KEY: "${CPA_MANAGER_ADMIN_KEY}"
+      CPA_UPSTREAM_URL: "http://cli-proxy-api:8317"
+      CPA_MANAGEMENT_KEY: "${CPA_MANAGEMENT_KEY}"
+      USAGE_COLLECTOR_MODE: "auto"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    pull_policy: always
+    restart: unless-stopped
+    depends_on:
+      - cli-proxy-api
+      - cpa-manager-plus
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro

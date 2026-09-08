@@ -8,7 +8,7 @@ export default function Login() {
   const nav = useNavigate();
   const t = useT();
   // Default to the current page origin: when the UI is hosted by CPA at
-  // /v0/resource/plugins/cpa-key-policy/index.html, the API is on the same
+  // /v0/resource/plugins/cpa-key-quota/index.html, the API is on the same
   // origin, so same-origin requests avoid CORS and hit the right host:port.
   // In standalone dev (vite), origin is the dev server, which the vite proxy
   // forwards to CPA — still correct.

@@ -1,0 +1,103 @@
+name: cpa-key-quota-e2e
+
+services:
+  builder:
+    build:
+      context: ..
+      dockerfile: e2e/Dockerfile.plugin
+    image: local/cpa-key-quota-plugin:e2e
+    volumes:
+      - plugin_lib:/out
+
+  home:
+    image: eceasy/cli-proxy-api-home:latest
+    working_dir: /CLIProxyAPIHome
+    entrypoint: ["/bin/sh", "/import/home-entrypoint.sh"]
+    volumes:
+      - ./cluster.yaml:/CLIProxyAPIHome/cluster.yaml:ro
+      - ./home-config.yaml:/import/config.yaml:ro
+      - ./home-entrypoint.sh:/import/home-entrypoint.sh:ro
+      - home_data:/CLIProxyAPIHome/data
+      - home_auths:/CLIProxyAPIHome/auths
+    ports:
+      - "18327:8327"
+    expose:
+      - "8327"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "./CLIProxyAPIHome",
+          "-h",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+      start_period: 8s
+
+  mock:
+    image: python:3.12-alpine
+    command: ["python", "/app/mock.py"]
+    volumes:
+      - ./mock.py:/app/mock.py:ro
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  home-init:
+    image: python:3.12-alpine
+    depends_on:
+      home:
+        condition: service_started
+    environment:
+      HOME_URL: http://home:8327
+      MGMT_KEY: e2e-mgmt-key
+    volumes:
+      - ./seed_prices.py:/app/seed_prices.py:ro
+    command: ["python", "/app/seed_prices.py"]
+
+  cpa:
+    image: eceasy/cli-proxy-api:latest
+    depends_on:
+      mock:
+        condition: service_healthy
+      home:
+        condition: service_started
+    command: ["./CLIProxyAPI", "-config", "/CLIProxyAPI/config.yaml", "-local-model"]
+    volumes:
+      - ./cpa-config.yaml:/CLIProxyAPI/config.yaml:ro
+      - plugin_lib:/CLIProxyAPI/plugins
+      - cpa_data:/CLIProxyAPI/data
+      - cpa_auths:/CLIProxyAPI/auths
+    ports:
+      - "18317:8317"
+    expose:
+      - "8317"
+
+  e2e:
+    image: python:3.12-alpine
+    depends_on:
+      cpa:
+        condition: service_started
+      mock:
+        condition: service_healthy
+      home:
+        condition: service_started
+    environment:
+      CPA_URL: http://cpa:8317
+      HOME_URL: http://home:8327
+      MGMT_KEY: e2e-mgmt-key
+    volumes:
+      - ./e2e.py:/app/e2e.py:ro
+    command: ["python", "/app/e2e.py"]
+
+volumes:
+  plugin_lib:
+  cpa_data:
+  cpa_auths:
+  home_data:
+  home_auths:

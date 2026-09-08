@@ -1,10 +1,8 @@
 package policy
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestParseTokenUsageOpenAI(t *testing.T) {
@@ -91,17 +89,6 @@ func TestComputeCost(t *testing.T) {
 	// No usage found → 0 cost even if priced.
 	if c := ComputeCost(3, 15, true, TokenUsage{}); c != 0 {
 		t.Fatalf("no-usage cost = %v, want 0", c)
-	}
-}
-
-func TestPriceForAlias(t *testing.T) {
-	k := &KeyConfig{Models: []ModelRule{{Alias: "fast", InputPricePerMillion: 2, OutputPricePerMillion: 8, CacheReadPricePerMillion: 0.2}}}
-	in, out, cache, ok := k.PriceForAlias("Fast") // case-insensitive
-	if !ok || in != 2 || out != 8 || cache != 0.2 {
-		t.Fatalf("got in=%v out=%v cache=%v ok=%v", in, out, cache, ok)
-	}
-	if _, _, _, ok := k.PriceForAlias("missing"); ok {
-		t.Fatal("missing alias should not be priced")
 	}
 }
 
@@ -232,100 +219,5 @@ func TestComputeCacheCostBreakdownAdditive(t *testing.T) {
 	}
 	if cacheRead != 200_000 {
 		t.Fatalf("cacheRead = %d, want 200000 (creation excluded)", cacheRead)
-	}
-}
-
-// the policy layer: RecordUsage bills from already-parsed token counts (as
-// delivered by usage.handle), with no response body to parse. Previously only
-// RecordResponseCost existed, which required a parseable body — unreachable
-// for streams. 1M input × $1/M = $1.00 == daily limit → next auth blocked.
-func TestRecordUsageBillsFromParsedTokens(t *testing.T) {
-	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
-	store := NewStore()
-	store.SetClock(func() time.Time { return now })
-	if err := store.Configure(Config{
-		Enabled:   true,
-		StateFile: filepath.Join(t.TempDir(), "state.json"),
-		Keys: []KeyConfig{{
-			ID: "streamy", Enabled: true, DailyLimitUSD: 1.00,
-			KeyHash: hashForUsageTest(t, "cpa_stream"),
-			Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex",
-				InputPricePerMillion: 1, OutputPricePerMillion: 1}},
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	hdr := map[string][]string{"Authorization": {"Bearer cpa_stream"}}
-
-	// No body involved — usage came pre-parsed from the host's usage.handle.
-	cost := store.RecordUsage("cpa_stream", "fast", "gpt-5-codex", false, UsageDetail{
-		InputTokens: 1_000_000, OutputTokens: 0, TotalTokens: 1_000_000,
-	})
-	if !nearly(cost, 1.0) {
-		t.Fatalf("cost = %v, want 1.0", cost)
-	}
-	d := store.Authenticate("POST", "/v1/chat/completions", hdr, nil, []byte(`{"model":"fast"}`))
-	if d.Allowed || !d.CostLimited || d.Reason != "daily_exceeded" {
-		t.Fatalf("streaming usage should be billed & block: %+v", d)
-	}
-}
-
-// TestRecordUsageUnknownKeyZeroCost: usage for a key not in our config bills
-// nothing (the host fires usage.handle for all keys, including non-managed ones).
-func TestRecordUsageUnknownKeyZeroCost(t *testing.T) {
-	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
-	store := NewStore()
-	store.SetClock(func() time.Time { return now })
-	if err := store.Configure(Config{
-		Enabled:   true,
-		StateFile: filepath.Join(t.TempDir(), "state.json"),
-		Keys: []KeyConfig{{
-			ID: "k", Enabled: true, DailyLimitUSD: 0.01,
-			KeyHash: hashForUsageTest(t, "cpa_known"),
-			Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex",
-				InputPricePerMillion: 1, OutputPricePerMillion: 1}},
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	cost := store.RecordUsage("cpa_unknown", "fast", "gpt-5-codex", false, UsageDetail{
-		InputTokens: 1_000_000, OutputTokens: 1_000_000,
-	})
-	if cost != 0 {
-		t.Fatalf("unknown key should cost 0, got %v", cost)
-	}
-}
-
-// TestRecordUsageMatchesByID verifies the real host wire value: CPA forwards
-// our auth Principal (key.ID) as the UsageRecord.APIKey, not the plaintext
-// secret. RecordUsage must resolve the key by ID.
-func TestRecordUsageMatchesByID(t *testing.T) {
-	now := time.Date(2026, 6, 29, 10, 0, 0, 0, time.UTC)
-	store := NewStore()
-	store.SetClock(func() time.Time { return now })
-	if err := store.Configure(Config{
-		Enabled:   true,
-		StateFile: filepath.Join(t.TempDir(), "state.json"),
-		Keys: []KeyConfig{{
-			ID: "team-x", Enabled: true, DailyLimitUSD: 0.50,
-			KeyHash: hashForUsageTest(t, "cpa_secret_xyz"),
-			Models: []ModelRule{{Alias: "fast", Provider: "codex", TargetModel: "gpt-5-codex",
-				InputPricePerMillion: 1, OutputPricePerMillion: 1}},
-		}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	hdr := map[string][]string{"Authorization": {"Bearer cpa_secret_xyz"}}
-
-	// Host sends key.ID ("team-x"), NOT the secret. Must still bill.
-	cost := store.RecordUsage("team-x", "fast", "gpt-5-codex", false, UsageDetail{
-		InputTokens: 500_000, OutputTokens: 0, TotalTokens: 500_000,
-	})
-	if !nearly(cost, 0.50) {
-		t.Fatalf("cost = %v, want 0.50", cost)
-	}
-	d := store.Authenticate("POST", "/v1/chat/completions", hdr, nil, []byte(`{"model":"fast"}`))
-	if d.Allowed || !d.CostLimited || d.Reason != "daily_exceeded" {
-		t.Fatalf("ID-matched usage should bill & block: %+v", d)
 	}
 }

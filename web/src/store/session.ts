@@ -79,7 +79,7 @@ export async function verifySession(
 ): Promise<Session> {
   const s = current;
   if (!s) throw new Error("no session");
-  const res = await fetchImpl(s.baseUrl + "/v0/management/plugins/cpa-key-policy/status", {
+  const res = await fetchImpl(s.baseUrl + "/v0/management/plugins/cpa-key-quota/status", {
     headers: { Authorization: "Bearer " + s.secretKey },
   });
   if (!res.ok) {

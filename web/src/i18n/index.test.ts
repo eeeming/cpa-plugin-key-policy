@@ -25,15 +25,14 @@ describe("translate", () => {
     setLocale("en");
     expect(translate("keys.refresh")).toBe("Refresh");
     setLocale("ru");
-    expect(translate("keys.refresh")).toBe("Обновить");
+    expect(translate("keys.refresh")).toBe("Refresh");
   });
 
   it("interpolates {{name}} placeholders", () => {
     _resetLocale("en");
-    expect(translate("keys.rotateConfirm", { id: "team-a" })).toBe(
-      "Rotate the key for team-a? The old key becomes invalid immediately.",
+    expect(translate("keys.unbindConfirm", { id: "team-a" })).toBe(
+      "Unbind team-a? Plus api-keys are not deleted.",
     );
-    expect(translate("edit.title", { id: "foo" })).toBe("Edit Key · foo");
   });
 
   it("handles zh-CN <-> zh-TW divergence (simplified vs traditional)", () => {
@@ -49,14 +48,14 @@ describe("translate", () => {
     // key and assert fallback path by requesting a locale that lacks it.
     _resetLocale("en");
     // 'header.title' exists in en, so this is NOT a fallback case — sanity.
-    expect(translate("header.title")).toBe("cpa-key-policy Management");
+    expect(translate("header.title")).toBe("cpa-key-quota");
     // A genuinely unknown key returns the key itself (never empty).
     expect(translate("nonexistent.deep.key")).toBe("nonexistent.deep.key");
   });
 
   it("ignores unknown interpolation names (leaves the placeholder)", () => {
     _resetLocale("en");
-    expect(translate("keys.rotateConfirm", { wrong: "x" })).toContain("{{id}}");
+    expect(translate("keys.unbindConfirm", { wrong: "x" })).toContain("{{id}}");
   });
 });
 

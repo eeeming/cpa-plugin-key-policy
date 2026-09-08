@@ -1,260 +1,198 @@
-# cpa-key-policy
+# cpa-key-quota
 
-Downstream **API key policy** plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
+Per-key USD and RPM quota plugin for [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI).
 
-In plain words: you issue your own `cpa_…` keys to clients. Each key only sees the models you allow, can be rate-limited and budget-limited, and is routed to real CPA upstream providers (Codex, Claude, OpenAI-compat channels, etc.). CPA’s own `api-keys` can still exist for admin use — **do not put plugin-issued keys into `api-keys`**, or you bypass this plugin.
+It does **not** issue keys and does **not** replace Plus authentication. You bind keys that already exist in Plus `api-keys`. USD amounts are billed from the **CPA-Manager-Plus** price table (this plugin has no prices of its own). Bound, enabled policies that exceed daily USD, weekly USD, or RPM return HTTP 429. Unbound keys and disabled policies are no-ops (Plus still serves them).
 
 | | |
 |---|---|
-| **Repo** | [origin652/cpa-plugin-key-policy](https://github.com/origin652/cpa-plugin-key-policy) |
+| **Plugin ID** | `cpa-key-quota` |
 | **License** | MIT |
-| **Install** | [CLIProxyAPI Plugins Store](https://github.com/router-for-me/CLIProxyAPI-Plugins-Store) or build from source |
-| **中文说明** | [README.zh-CN.md](./README.zh-CN.md) |
+| **Chinese** | [README.zh-CN.md](./README.zh-CN.md) |
 
----
+## Requirements
 
-## What it does (human version)
+- CLIProxyAPI v7 plugin host that can `dlopen` a c-shared `.so`. Use a glibc image such as `eceasy/cli-proxy-api`. Alpine / `CGO_ENABLED=0` hosts cannot load this plugin.
+- Linux `amd64` or `arm64` matching the CPA host (`CGO_ENABLED=1`).
+- **CPA-Manager-Plus** for USD limits. The plugin reads Plus `GET /v0/management/model-prices` and bills with those rates. RPM still works if Plus is missing.
 
-1. **Issue keys** — create many downstream keys; each has an allow-list of models (or shared aliases).
-2. **Route** — client calls with alias name `fast`; plugin rewrites to e.g. `codex` + `gpt-5.4-mini`.
-3. **Limit** — per-key RPM, optional daily/weekly USD caps, token or per-call billing.
-4. **Isolate credentials (tiers / groups)** — pin a request to Codex free/team/… or to a **custom classify group** so it never lands on the wrong auth file.
-5. **Multi-target aliases** — one alias can point at several backends (priority or round-robin).
-6. **Web UI** — manage keys, global aliases, and credential classification inside CPA.
+Do **not** declare `frontend_auth_provider`. Over-quota must `Terminate` with 429, not `Authenticated: false`.
 
----
+## Deploy
 
-## Concepts
+The plugin is a `.so` that CPA `dlopen`s. Typical layout: CPA and CPA-Manager-Plus on the same Docker network; the `.so` is bind-mounted into CPA’s `plugins/` directory.
 
-### Downstream key
+### 1. Build the `.so`
 
-A plugin-owned secret (`cpa_…`). Authenticated only by this plugin. Holds:
-
-- allowed **models** and/or **aliases**
-- RPM
-- optional daily / weekly dollar limits
-- optional `allow_models_endpoint` (see below)
-
-### Alias (global mapping table)
-
-A reusable name like `fast` that expands to one or more **targets**:
-
-| Field | Meaning |
-|--------|---------|
-| `provider` | CPA provider id (`codex`, `claude`, or an openai-compatibility **name** such as `cerebras`) |
-| `target_model` | Real upstream model id |
-| `group` | Optional credential filter (see [Credential groups](#credential-groups-tiers--classify)) |
-| `dispatch` | `priority` (always first usable target) or `round-robin` |
-| billing | `tokens` (per-million prices) or `per_call` (fixed USD) |
-
-Keys can **reference** aliases instead of duplicating targets. Multi-target aliases expand to several rules with the same alias name; auth and routing share one pick per request so the `group` filter matches the chosen target.
-
-### Credential groups (tiers + classify)
-
-Two sources of “which auth file may serve this request”:
-
-| Kind | How it appears in the picker | Stored in mapping as |
-|------|------------------------------|----------------------|
-| **Built-in tier** (Codex `plan_type`, Antigravity `tier`) | e.g. Free tier / Team | bare name: `free`, `team`, `supported` |
-| **Custom classify rule** | e.g. **Custom · vip** | prefixed: `classify:vip` |
-
-**Runtime rule:** if a mapping sets a group, the plugin scheduler **only** picks auth files in that group. No match → hard failure (`auth_not_found`), never silently fall back to another tier.
-
-**Custom classification** (Web UI → Mapping → Credential Classification):
-
-- Match auth-file fields (`filename`, `provider`, `plan_type`, `tier`, …) with a regex.
-- Assign a **group name** you choose (stored bare on the rule).
-- Catalog and mappings use `classify:<name>` so it never collides with built-in `free` / `team`.
-- One file can match **multiple** custom groups (shown under each).
-- If no custom rule matches → built-in tier (for Codex/Antigravity) or flat (no group) for other auth-file providers.
-- OpenAI-compat / API-key channels stay **flat** (no groups).
-
-Configure classify rules in the UI, or via management API (`/classify-rules`, `/classify-preview`, `/catalog`). You do not need to hand-edit state JSON for normal use.
-
-### OpenAI-compatibility providers
-
-Channels under CPA `openai-compatibility` (e.g. a named proxy) use the **channel name** as `provider`. The plugin maps it to CPA’s internal key `openai-compatible-<name>` when routing. Models must be listed on that channel in CPA config, or the host reports no auth for that model.
-
----
-
-## Capabilities (plugin hooks)
-
-| Hook | Role |
-|------|------|
-| Frontend auth | Know plugin keys; enforce alias allow-list, RPM, budget; stamp route + group metadata |
-| Model router | Alias → provider + target model |
-| Scheduler | When `group` is set, filter auth candidates by tier / `classify:` group |
-| Response interceptor | Non-stream JSON: rewrite top-level `model` back to the alias |
-| Usage | Token / per-call billing into the state file |
-| Management API + embedded Web UI | Keys, aliases, classify rules, status |
-
----
-
-## Build
-
-Linux `.so` needs cgo and a matching toolchain:
+On a Linux host of the same arch as CPA:
 
 ```bash
-make test
-make build-linux          # builds web UI, then linux amd64/arm64 .so
-# or
-make web-build
-GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -buildvcs=false -tags cshared \
-  -buildmode=c-shared -o dist/cpa-key-policy_linux_amd64.so ./cmd/cpa-key-policy
+make build-linux-amd64   # or: make build-linux-arm64
 ```
 
-On Windows, build the `.so` via WSL/Linux. `go test ./...` uses a non-cgo stub so unit tests run without a shared-library toolchain.
+Output: `dist/cpa-key-quota_linux_<arch>.so`.
 
-Copy the `.so` into CPA `plugins.dir` and enable the plugin in config.
+From macOS (or any machine that is not the CPA arch), cross-compile with Docker. CPA on x86_64 needs `linux/amd64` even if your laptop is ARM:
 
----
+```bash
+docker build --platform linux/amd64 -f e2e/Dockerfile.plugin -t cpa-key-quota-so:amd64 .
+cid=$(docker create --platform linux/amd64 cpa-key-quota-so:amd64)
+mkdir -p dist
+docker cp "$cid":/cpa-key-quota.so dist/cpa-key-quota_linux_amd64.so
+docker rm "$cid"
+file dist/cpa-key-quota_linux_amd64.so   # must say: ELF 64-bit LSB shared object, x86-64
+```
 
-## Config
+Use `--platform linux/arm64` and `cpa-key-quota_linux_arm64.so` on ARM CPA hosts. Do not copy an ARM `.so` onto an amd64 host (or the reverse): CPA will fail to load it.
 
-Minimal shape (see also [`config.example.yaml`](./config.example.yaml)):
+### 2. Install the file
+
+Copy it to the directory CPA loads (`plugins` in `config.yaml`, often mounted at `/CLIProxyAPI/plugins`):
+
+```text
+plugins/linux/amd64/cpa-key-quota.so
+```
+
+ARM hosts: `plugins/linux/arm64/cpa-key-quota.so`.
+
+### 3. Point the plugin at CPA-Manager-Plus
+
+Add the snippet in [Configure](#configure) to CPA `config.yaml`. `plus_base_url` must be the Plus base URL **as the CPA container sees it** (Docker DNS, not a public hostname), for example `http://cpa-manager-plus:18317`. `plus_management_key` is the **Plus admin key** (`CPA_MANAGER_ADMIN_KEY`), used to read the price table and, for **Sync**, Plus `api-keys`. It is not the CPA `remote-management.secret-key`.
+
+USD limits do not work until this is set and Plus has model prices. See [Prices](#prices).
+
+### 4. Restart CPA
+
+The plugins directory is often mounted read-only. Replacing the `.so` is not enough; restart the CPA process so it `dlopen`s the new file:
+
+```bash
+docker restart cli-proxy-api
+```
+
+Plus and any reverse proxy do not need a restart for a plugin-only update.
+
+### 5. Verify
+
+With the CPA management key:
+
+```http
+GET /v0/management/plugins
+GET /v0/management/plugins/cpa-key-quota/status
+```
+
+Expect `cpa-key-quota` `registered: true`, `effective_enabled: true`, and `prices_available: true` once Plus returns a table. CPA logs should show `plugin loaded plugin_id=cpa-key-quota path=plugins/linux/<arch>/cpa-key-quota.so`.
+
+The management UI is embedded at `/v0/resource/plugins/cpa-key-quota/index.html` (Plus panel menu **Key Quota**).
+
+To ship a new build later: rebuild, overwrite the same `.so` path, restart CPA only.
+
+## Prices
+
+**USD billing depends on CPA-Manager-Plus.** This plugin does not ship, cache-edit, or serve a price table. Edit rates in Plus; the plugin only reads them.
+
+| | |
+|---|---|
+| **Required service** | CPA-Manager-Plus (`seakee/cpa-manager-plus` in a typical compose) |
+| **API** | `GET {plus_base_url}/v0/management/model-prices` with Bearer `plus_management_key` |
+| **Fallback** | If that path is HTTP 404, `GET …/v0/management/billing/model-prices` (Home / older Plus) |
+| **Without Plus** | Empty `plus_base_url`, or no table yet: USD gates stay off. RPM still works. |
+
+Prices are cached for 30 seconds. A later fetch failure keeps the last successful table so USD limits do not fail open. There is no hardcoded model family (for example no special-case GPT-5/6 rates): a name is billed as soon as Plus lists it.
+
+## Configure
+
+See [`config.example.yaml`](config.example.yaml). Minimal `config.yaml` fragment:
 
 ```yaml
 plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cpa-key-policy:
+    cpa-key-quota:
       enabled: true
       priority: 10
-      state_file: "cpa-key-policy-state.json"
+      state_file: "cpa-key-quota-state.json"
+      plus_base_url: "http://cpa-manager-plus:18317"
+      plus_management_key: "your-plus-admin-key"
 ```
 
-Notes:
+| Field | Purpose |
+|---|---|
+| `enabled` | Pause the plugin without unloading it |
+| `state_file` | JSON file for bound policies and usage (created if missing; chmod 600) |
+| `plus_base_url` | CPA-Manager-Plus base URL (Docker-internal recommended). See [Prices](#prices) |
+| `plus_management_key` | Plus admin Bearer for the price API and for **Sync** (`GET /v0/management/api-keys`) |
+| `keys` | Optional seed list. After the state file exists, the file wins |
 
-- If `state_file` exists, it is the source of truth for keys / aliases / classify rules / usage.
-- Prefer creating keys and aliases in the **Web UI** or Management API; seed YAML `keys` is mainly for first boot.
-- Never commit real key hashes, management secrets, or live host URLs into public docs.
+Usage is kept in memory and flushed to the state file about every 15s (atomic temp + rename).
 
----
+## Bind and sync
 
-## Web Management UI
+**Bind** (management UI **Add**, or API): submit the existing Plus key **plaintext once**. The plugin stores `sha256:` + a truncated preview + CPA `caller_scope`. Plaintext is never written to disk or returned in list/status JSON.
 
-Embedded in the plugin. After load, open:
+```http
+POST /v0/management/plugins/cpa-key-quota/keys
+Authorization: Bearer <CPA remote-management secret-key>
+Content-Type: application/json
 
-```text
-http://<your-cpa-host>:<api-port>/v0/resource/plugins/cpa-key-policy/index.html
+{"id":"k-team","name":"team","key":"sk-...","daily_limit_usd":0.5,"weekly_limit_usd":0,"rpm":0}
 ```
 
-Login with CPA **management** secret (`remote-management.secret-key` / management password). The secret stays in memory only (not `localStorage`); refresh → re-login.
+`0` on a limit means unlimited. PATCH the same path to edit limits, rename, enable/disable, or rotate the key (new plaintext, hashed immediately).
 
-UI areas:
+**Sync from Plus** (**Sync**): `POST /v0/management/plugins/cpa-key-quota/keys/sync` fetches Plus `GET /v0/management/api-keys` and binds keys that are not already hashed in the plugin. Existing names/limits/enabled flags are not overwritten. New keys start enabled with unlimited USD/RPM. Plus currently returns a plaintext string list **without display names**, so synced names default to the preview; rename in **Edit**.
 
-| Tab / page | Use for |
-|------------|---------|
-| Keys | Create / edit / rotate / delete keys; bind models or aliases; RPM & budgets |
-| Mapping → Aliases | Global multi-target aliases, dispatch, pricing |
-| Mapping → Classification | Custom credential groups + match preview |
-| Model picker | Catalog of providers; tier / **Custom · …** subgroups |
+Disable (`enabled: false`) pauses quota for that key; the Plus key still works. Unbind removes the policy only. Deleting the key from Plus `api-keys` is what produces 401.
 
-Dev UI without rebuilding the `.so`:
+## Rolling windows
 
-```bash
-cd web
-npm install
-VITE_CPA_BASE=http://127.0.0.1:8317 npm run dev
+Daily and weekly USD limits are **rolling**, not calendar days/weeks:
+
+- Daily: 24 hours from that key’s first billed request in the window, then the bucket resets
+- Weekly: 7×24 hours from first bill in the window, then the bucket resets
+
+The next reset time is shown on each key card. Unused keys show “starts at first bill”. The list is ordered by last request (most recent first).
+
+## Client errors
+
+HTTP **429**, OpenAI-shaped `error` object:
+
+| Gate | `error.type` / `error.code` | Notes |
+|---|---|---|
+| Daily or weekly USD | `insufficient_quota` | Message mentions daily vs weekly |
+| RPM | `rate_limit_exceeded` | `Retry-After: 60` |
+
+Unbound and disabled keys are not 429’d by this plugin.
+
+## Request path
+
+```
+client key
+  → Plus api-keys auth
+  → request.intercept_before
+       ├ not bound / policy disabled → no-op
+       └ bound and enabled
+            ├ over RPM / daily / weekly USD → Terminate 429
+            └ else admit; usage.handle bills from Plus prices
 ```
 
----
+## Privacy
 
-## Management API (summary)
+- **Stored per key:** `sha256:` of the secret, truncated preview, `caller_scope`, limits, usage. Not the secret.
+- **Management UI session:** CPA management key is kept in memory only (tab refresh logs you out). If the UI is iframed in the official panel with “remember password”, it may reuse the panel’s existing `localStorage` blob; this plugin never writes that key itself.
+- **Plus sync/prices:** the Plus admin key in `plus_management_key` can list plaintext `api-keys`. Treat it as a host secret. The plugin hashes in memory and does not persist those strings. Prefer an internal HTTPS or Docker-network `plus_base_url` (loopback `http://` is typical in compose). A public cleartext URL would expose the admin key and every api-key on the wire.
+- **State file:** any path the CPA process can write (operator-controlled). Mode 600. Do not commit it.
+- **Management API:** mutating `/v0/management/plugins/cpa-key-quota/*` is authenticated by **CPA**, not by the plugin. Do not expose those routes without the host secret-key.
+- **UI framing:** the embedded page sends `Content-Security-Policy: frame-ancestors 'self'` and only reuses the panel’s remembered key when the parent frame is same-origin.
+- **Prices down:** a failed Plus fetch keeps the last successful price table so USD limits do not fail open. No table yet ⇒ USD gate off, RPM still on.
 
-Exact paths (no path templates). Auth: CPA management bearer token.
-
-**Keys**
-
-- `GET/POST/PATCH/DELETE …/keys` (`id` in query or body for mutate)
-- `POST …/keys/rotate?id=…`
-- `POST …/keys/reset-rpm?id=…`
-- `GET …/keys/usage?id=…`
-- `GET …/status`
-
-**Aliases**
-
-- `GET/POST/DELETE …/aliases`
-
-**Classify**
-
-- `GET/POST/DELETE …/classify-rules`
-- `POST …/classify-rules/reorder`
-- `POST …/classify-preview` — group → credential ids (UI preview; bare group names)
-- `POST …/catalog` — body: auth-file credentials + models; response: picker `entries` with `classify:` groups
-
-Create key (plain key returned **once**):
-
-```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/keys" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "team-a",
-    "name": "Team A",
-    "rpm": 60,
-    "models": [
-      {"alias":"fast","provider":"codex","target_model":"gpt-5.4-mini","group":"free"}
-    ]
-  }'
-```
-
-Create a multi-target alias:
-
-```bash
-curl -X POST "$CPA/v0/management/plugins/cpa-key-policy/aliases" \
-  -H "Authorization: Bearer $MANAGEMENT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "alias": "cheap-chat",
-    "dispatch": "priority",
-    "billing_mode": "tokens",
-    "targets": [
-      {"provider":"cerebras","target_model":"gpt-oss-120b"},
-      {"provider":"codex","target_model":"gpt-5.4-mini","group":"free"}
-    ]
-  }'
-```
-
----
-
-## Client request behavior
-
-| Case | Result |
-|------|--------|
-| Known key + allowed alias | Auth OK → route → optional group filter → upstream |
-| Known key + unknown model | Auth rejected |
-| RPM / budget exceeded | Rejected |
-| Group set, no matching auth file | `auth_not_found` / unavailable (no cross-tier leak) |
-| Unknown key | Plugin declines; CPA may try native `api-keys` |
-| Non-stream chat response | Top-level `model` rewritten to alias |
-| Stream | Body not rewritten (v1) |
-
-### `/v1/models` on CPA main port
-
-Per-key `allow_models_endpoint`: **binary** — deny (401) or full global list. CPA cannot filter that list per plugin key on the main port.
-
-
----
-
-## Setup checklist
-
-1. Build / install the `.so` into CPA `plugins.dir`.
-2. Enable `plugins` + `cpa-key-policy` in CPA config; set `state_file`.
-3. Open the Web UI with the management secret.
-4. (Optional) Define **classify rules** if you need custom credential buckets.
-5. Create **aliases** (multi-target / pricing) and/or pick models per key (with tier or Custom group).
-6. Create keys, save the one-time `plain_key`, hand out to clients.
-7. Client: OpenAI-compatible base URL = CPA; `Authorization: Bearer cpa_…`; `model` = alias name.
-8. Ensure openai-compat channels list the models you map; empty model lists → host “no auth” errors.
-
----
+Accepted operator risk: Plus’s own `GET /v0/management/api-keys` returns plaintext. This plugin cannot change that API.
 
 ## Tests
 
 ```bash
-go test ./...
-cd web && npm test && npm run build
+go test ./internal/policy/ ./internal/plugin/
+cd web && npm test
 ```
 
+Docker stacks: `make e2e-docker` (Home prices) and `make e2e-plus` (CPA-Manager-Plus). Details: [e2e/README.md](e2e/README.md).

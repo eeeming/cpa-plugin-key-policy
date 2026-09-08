@@ -1,0 +1,18 @@
+host: ""
+port: 8317
+debug: true
+logging-to-file: false
+usage-statistics-enabled: true
+
+remote-management:
+  allow-remote: true
+  secret-key: "e2e-mgmt-key"
+  disable-control-panel: true
+
+auth-dir: "/CLIProxyAPIHome/auths"
+
+api-keys:
+  - "sk-bound"
+  - "sk-unbound"
+  - "sk-rpm"
+  - "sk-disabled"

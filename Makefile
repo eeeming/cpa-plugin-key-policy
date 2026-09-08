@@ -1,10 +1,10 @@
-PLUGIN := cpa-key-policy
+PLUGIN := cpa-key-quota
 PKG := ./cmd/cpa-key-policy
 DIST := dist
 WEB := web
 EMBED_INDEX := internal/plugin/web/dist/index.html
 
-.PHONY: test web-build build-linux-amd64 build-linux-arm64 build-linux clean
+.PHONY: test web-build build-linux-amd64 build-linux-arm64 build-linux clean e2e-docker
 
 test:
 	go test ./...
@@ -26,3 +26,11 @@ build-linux: build-linux-amd64 build-linux-arm64
 
 clean:
 	rm -rf $(DIST)
+
+# Full-stack Docker E2E: build linux .so, run CPA + mock Plus/LLM, hit real HTTP paths.
+e2e-docker:
+	bash e2e/run.sh
+
+# CPA + CPA-Manager-Plus (price table) + plugin .so.
+e2e-plus:
+	bash e2e/plus/run.sh

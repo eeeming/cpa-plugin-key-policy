@@ -1,0 +1,17 @@
+FROM golang:1.23-bookworm AS build
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc libc6-dev \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=1 go build -buildvcs=false -tags cshared -buildmode=c-shared \
+    -o /cpa-key-quota.so ./cmd/cpa-key-policy
+
+FROM debian:bookworm-slim
+COPY --from=build /cpa-key-quota.so /cpa-key-quota.so
+COPY e2e/install-plugin.sh /install-plugin.sh
+RUN chmod +x /install-plugin.sh
+ENTRYPOINT ["/install-plugin.sh"]

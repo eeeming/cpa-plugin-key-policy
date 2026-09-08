@@ -1,34 +1,27 @@
-# Example CLIProxyAPI snippet for cpa-key-policy.
-# Replace placeholders. Do not commit real secrets or production hosts.
+# CLIProxyAPI config fragment for plugin id cpa-key-quota.
+# Bind keys that already exist in Plus api-keys. Do not put plugin-issued
+# secrets into api-keys — Plus still authenticates.
+#
+# USD billing depends on CPA-Manager-Plus: this plugin has no price table.
+# plus_base_url must be reachable from the CPA process (Docker DNS, not a
+# public hostname). plus_management_key is the Plus admin key
+# (CPA_MANAGER_ADMIN_KEY), not CPA remote-management.secret-key.
 
 plugins:
   enabled: true
   dir: "plugins"
   configs:
-    cpa-key-policy:
+    cpa-key-quota:
       enabled: true
       priority: 10
-      # Runtime source of truth once created (keys, aliases, classify rules, usage).
-      state_file: "cpa-key-policy-state.json"
-
-      # Prefer creating keys/aliases/classify rules via Web UI or Management API.
-      # Seed keys below are mainly for first boot when state_file does not exist.
-      keys:
-        - id: "team-a"
-          name: "Team A"
-          enabled: true
-          key_hash: "sha256:replace-with-hash"
-          key_preview: "cpa_abc...xyz"
-          rpm: 60
-          # Either bind models directly…
-          models:
-            - alias: "fast"
-              provider: "codex"
-              target_model: "gpt-5.4-mini"
-              group: "free" # built-in tier; custom groups use classify:name
-            - alias: "compat-demo"
-              provider: "cerebras" # openai-compatibility channel name
-              target_model: "gpt-oss-120b"
-          # …or reference global aliases created in the UI / POST /aliases:
-          # aliases:
-          #   - alias: "cheap-chat"
+      # Bound policies + usage. Created if missing. Keep this file private.
+      state_file: "cpa-key-quota-state.json"
+      # CPA-Manager-Plus base URL. GET /v0/management/model-prices
+      # (404 → GET /v0/management/billing/model-prices).
+      # Empty URL = RPM only (no USD limits, no Plus sync).
+      plus_base_url: "http://cpa-manager-plus:18317"
+      # Plus admin Bearer: price listing + POST .../keys/sync
+      # (Plus GET /v0/management/api-keys). Treat as a host secret.
+      plus_management_key: "replace-with-manager-plus-admin-key"
+      # Optional seed. Ignored once state_file exists.
+      # keys: []

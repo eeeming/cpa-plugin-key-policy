@@ -1,0 +1,42 @@
+host: ""
+port: 8317
+debug: true
+logging-to-file: false
+usage-statistics-enabled: true
+force-model-prefix: false
+request-retry: 0
+max-retry-credentials: 1
+disable-cooling: true
+
+remote-management:
+  allow-remote: true
+  secret-key: "e2e-mgmt-key"
+  disable-control-panel: true
+
+auth-dir: "/CLIProxyAPI/auths"
+
+api-keys:
+  - "sk-bound"
+  - "sk-unbound"
+  - "sk-rpm"
+  - "sk-disabled"
+
+plugins:
+  enabled: true
+  dir: "plugins"
+  configs:
+    cpa-key-quota:
+      enabled: true
+      priority: 10
+      state_file: "/CLIProxyAPI/data/cpa-key-quota-state.json"
+      plus_base_url: "http://plus:18317"
+      plus_management_key: "e2e-admin-key"
+
+openai-compatibility:
+  - name: "mock"
+    base-url: "http://mock:8080/v1"
+    api-key-entries:
+      - api-key: "sk-upstream"
+    models:
+      - name: "gpt-4.1-mini"
+        alias: "gpt-4.1-mini"

@@ -1,0 +1,10 @@
+sqlite:
+  path: "/CLIProxyAPIHome/data/home.db"
+  slow-query-threshold: "1s"
+
+node:
+  external-ip: "home"
+  port: 8327
+  heartbeat-interval: "5s"
+  heartbeat-timeout: "20s"
+  event-poll-interval: "3s"

@@ -1,10 +1,8 @@
 package policy
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,12 +14,17 @@ const HashPrefix = "sha256:"
 
 var ErrUnknownKey = errors.New("unknown key")
 
-func GenerateKey() (string, error) {
-	buf := make([]byte, 32)
-	if _, err := rand.Read(buf); err != nil {
-		return "", err
+const callerScopePrefix = "cli-proxy-api:caller-scope:v1\x00"
+
+// CallerScope matches CPA's irreversible downstream-key namespace
+// (sha256("cli-proxy-api:caller-scope:v1\x00" + principal)).
+func CallerScope(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
 	}
-	return "cpa_" + base64.RawURLEncoding.EncodeToString(buf), nil
+	sum := sha256.Sum256([]byte(callerScopePrefix + value))
+	return hex.EncodeToString(sum[:])
 }
 
 func HashKey(key string) (string, error) {
@@ -48,10 +51,30 @@ func MatchHash(key, hash string) bool {
 
 func PreviewKey(key string) string {
 	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	// Never persist or display the full secret, even for short keys.
 	if len(key) <= 12 {
-		return key
+		if len(key) < 6 {
+			return "***"
+		}
+		return fmt.Sprintf("%s...%s", key[:2], key[len(key)-2:])
 	}
 	return fmt.Sprintf("%s...%s", key[:7], key[len(key)-5:])
+}
+
+// SanitizeStoredPreview remasks previews persisted before PreviewKey always
+// truncated secrets (full key stored when len ≤ 12).
+func SanitizeStoredPreview(preview string) string {
+	preview = strings.TrimSpace(preview)
+	if preview == "" || strings.Contains(preview, "...") {
+		return preview
+	}
+	if len(preview) <= 12 {
+		return "***"
+	}
+	return preview
 }
 
 func ExtractAPIKey(headers http.Header, query map[string][]string) string {
