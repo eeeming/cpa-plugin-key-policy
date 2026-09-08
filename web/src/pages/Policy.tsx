@@ -133,18 +133,20 @@ export default function Policy() {
     }
   };
 
-  const disableSelected = async () => {
-    if (!confirm(t("keys.bulkDisableConfirm", { count: selected.length }))) return;
+  const setEnabledSelected = async (enabled: boolean) => {
+    const confirmKey = enabled ? "keys.bulkEnableConfirm" : "keys.bulkDisableConfirm";
+    const doneKey = enabled ? "keys.bulkEnableDone" : "keys.bulkDisableDone";
+    if (!confirm(t(confirmKey, { count: selected.length }))) return;
     const failures: string[] = [];
     for (const id of selected) {
       try {
-        await patchKey({ id, enabled: false });
+        await patchKey({ id, enabled });
       } catch (e) {
         failures.push(id + ": " + (e as Error).message);
       }
     }
     if (failures.length) setError(t("keys.bulkFailed", { detail: failures.join("; ") }));
-    else setNotice(t("keys.bulkDisableDone", { count: selected.length }));
+    else setNotice(t(doneKey, { count: selected.length }));
     setSelected([]);
     await load();
   };
@@ -248,13 +250,14 @@ export default function Policy() {
         <div className="fp-actions">
           <button className="btn sm" type="button" disabled={!hasSel} onClick={() => setShowBulk(true)}>{t("keys.setLimits")}</button>
           <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void resetSelected()}>{t("keys.reset")}</button>
-          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void disableSelected()}>{t("keys.disable")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void setEnabledSelected(true)}>{t("keys.enable")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void setEnabledSelected(false)}>{t("keys.disable")}</button>
           <button className="btn sm danger-outline" type="button" disabled={!hasSel} onClick={() => void unbindSelected()}>{t("keys.unbind")}</button>
         </div>
         <button className="btn sm tb-refresh" onClick={() => void load()}>{t("keys.refresh")}</button>
       </div>
-      {error && <div className="card" style={{ color: "var(--danger)" }}>{error}</div>}
-      {notice && <div className="card" style={{ color: "var(--ok)" }}>{notice}</div>}
+      {error && <div className="quota-flash err">{error}</div>}
+      {notice && <div className="quota-flash ok">{notice}</div>}
       {loading && <div className="muted">{t("keys.loading")}</div>}
       {!loading && keys.length === 0 && <div className="card muted">{t("keys.empty")}</div>}
       <div

@@ -256,6 +256,18 @@ th.num, td.num { text-align: right; }
 }
 .quota-toolbar .tb-count.on { color: var(--text); font-weight: 600; }
 .quota-toolbar .tb-refresh { margin-left: auto; }
+.quota-flash {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  font-size: 13px;
+}
+.quota-flash.ok { color: var(--ok); border-color: var(--ok-border); background: var(--ok-soft); }
+.quota-flash.err { color: var(--danger); border-color: var(--danger-border); background: var(--danger-soft); }
 
 .card-stack { display: flex; flex-direction: column; gap: 10px; position: relative; user-select: none; }
 .marquee {
@@ -317,6 +329,8 @@ th.num, td.num { text-align: right; }
   max-height: 16px;
   opacity: 0;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
 }
 .keycard .kc-check-box {
   display: block;

@@ -49,6 +49,8 @@
     "resetConfirm": "将 Reset {{count}} 把 Key 的插件 24H/7D 已用量，限额不变。Plus 用量不变。",
     "resetDone": "已重置 {{count}} 把。失败 {{failed}}。",
     "resetOneConfirm": "将 Reset「{{name}}」的插件 24H/7D 已用量，限额不变。Plus 用量不变。",
+    "bulkEnableConfirm": "启用所选 {{count}} 把 Key 的限额策略？",
+    "bulkEnableDone": "已启用 {{count}} 把。",
     "bulkDisableConfirm": "停用所选 {{count}} 把 Key 的限额策略？Plus 侧仍可调用。",
     "bulkDisableDone": "已停用 {{count}} 把。",
     "bulkUnbindConfirm": "解绑所选 {{count}} 把 Key？Plus api-keys 不会被删除。",

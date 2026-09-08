@@ -406,6 +406,17 @@ func TestBulkDisableAndUnbindViaExistingHandlers(t *testing.T) {
 		t.Fatalf("disabled key must be a no-op: %+v", d)
 	}
 
+	en := callManagement(t, app, http.MethodPatch, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id": "d1", "enabled": true,
+	}))
+	if en.StatusCode != http.StatusOK {
+		t.Fatalf("enable d1 = %d %s", en.StatusCode, en.Body)
+	}
+	listed = listPublicKeys(t, app)
+	if !listed["d1"].Enabled {
+		t.Fatalf("d1 should be re-enabled: %+v", listed["d1"])
+	}
+
 	del := callManagement(t, app, http.MethodDelete, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
 		"id": "d2",
 	}))
