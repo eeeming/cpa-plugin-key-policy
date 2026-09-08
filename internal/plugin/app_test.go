@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"cpa-key-policy/internal/policy"
@@ -91,6 +92,51 @@ func TestInterceptUnknownKeyNoop(t *testing.T) {
 	decodeEnvelope(t, raw, &resp)
 	if resp.Terminate {
 		t.Fatalf("unbound must not terminate: %+v", resp)
+	}
+}
+
+func TestPatchRotatesPlaintextWithoutStoringIt(t *testing.T) {
+	app := configureApp(t)
+	oldKey, newKey := "sk-old-secret", "sk-new-secret"
+	bind := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id": "rot", "name": "rot", "key": oldKey, "rpm": 10, "daily_limit_usd": 5,
+	}))
+	if bind.StatusCode != http.StatusCreated {
+		t.Fatalf("bind = %d %s", bind.StatusCode, bind.Body)
+	}
+	if strings.Contains(string(bind.Body), oldKey) {
+		t.Fatalf("bind response leaked plaintext: %s", bind.Body)
+	}
+
+	patched := callManagement(t, app, http.MethodPatch, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id": "rot", "key": newKey,
+	}))
+	if patched.StatusCode != http.StatusOK {
+		t.Fatalf("patch = %d %s", patched.StatusCode, patched.Body)
+	}
+	if strings.Contains(string(patched.Body), newKey) || strings.Contains(string(patched.Body), oldKey) {
+		t.Fatalf("patch response leaked plaintext: %s", patched.Body)
+	}
+	var got struct {
+		Key publicKey `json:"key"`
+	}
+	if err := json.Unmarshal(patched.Body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Key.KeyPreview == "" || strings.Contains(got.Key.KeyPreview, newKey) {
+		t.Fatalf("preview = %q", got.Key.KeyPreview)
+	}
+
+	listed := callManagement(t, app, http.MethodGet, "/v0/management/plugins/cpa-key-quota/keys", nil)
+	if strings.Contains(string(listed.Body), `"key_hash"`) || strings.Contains(string(listed.Body), newKey) {
+		t.Fatalf("list leaked hash or plaintext: %s", listed.Body)
+	}
+
+	if d := interceptBearer(t, app, oldKey); d.Terminate {
+		t.Fatalf("old key should be unbound no-op: %+v", d)
+	}
+	if d := interceptBearer(t, app, newKey); d.Terminate {
+		t.Fatalf("new key should be bound and admitted: %+v", d)
 	}
 }
 

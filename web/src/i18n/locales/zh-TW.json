@@ -27,7 +27,7 @@
     "loadFailed": "加载失败",
     "empty": "还没有绑定任何 Key。表外 Key 不限额。",
     "bind": "绑定",
-    "edit": "编辑限额",
+    "edit": "编辑",
     "disable": "停用",
     "enable": "启用",
     "unbind": "解绑",
@@ -47,11 +47,15 @@
   "bind": {
     "title": "绑定已有 Key",
     "name": "名称",
-    "key": "现有 Key 明文（只提交一次）",
+    "key": "现有 Key 明文",
+    "keyHint": "只用来计算哈希。磁盘和列表里只保留 sha256 与 preview，不会保存明文。",
+    "keyRotate": "更换 Key 明文（可选）",
+    "keyRotateHint": "留空则继续用当前绑定。填写新明文会重新哈希，明文不会落盘，列表只显示 preview。",
     "daily": "日限额 USD（空=不限）",
     "weekly": "周限额 USD（空=不限）",
     "rpm": "RPM（空=不限）",
     "submit": "绑定",
+    "save": "保存",
     "cancel": "取消"
   },
   "usage": {

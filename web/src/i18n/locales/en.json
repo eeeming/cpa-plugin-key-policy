@@ -27,7 +27,7 @@
     "loadFailed": "Failed to load",
     "empty": "No bound keys. Unlisted keys are unlimited.",
     "bind": "Bind",
-    "edit": "Edit limits",
+    "edit": "Edit",
     "disable": "Disable",
     "enable": "Enable",
     "unbind": "Unbind",
@@ -47,11 +47,15 @@
   "bind": {
     "title": "Bind existing key",
     "name": "Name",
-    "key": "Existing key (submitted once)",
+    "key": "Existing key plaintext",
+    "keyHint": "Used only to compute a hash. Disk and list keep sha256 + preview, never the secret.",
+    "keyRotate": "Replace key plaintext (optional)",
+    "keyRotateHint": "Leave blank to keep the current binding. A new value is hashed immediately and is not stored.",
     "daily": "Daily USD (empty = unlimited)",
     "weekly": "Weekly USD (empty = unlimited)",
     "rpm": "RPM (empty = unlimited)",
     "submit": "Bind",
+    "save": "Save",
     "cancel": "Cancel"
   },
   "usage": {

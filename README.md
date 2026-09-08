@@ -31,7 +31,7 @@ Do **not** declare `frontend_auth_provider`. Over-quota must Terminate, not `Aut
 
 ## Bind
 
-POST `/v0/management/plugins/cpa-key-quota/keys` with the existing plaintext key once. Only `sha256` hash + preview are stored.
+POST `/v0/management/plugins/cpa-key-quota/keys` with the existing plaintext key. Only `sha256` hash + preview are stored. PATCH can rotate the key the same way; plaintext is never written back.
 
 Disable (`enabled: false`) pauses the quota without deleting the Plus key.
 

@@ -97,7 +97,9 @@ export default function Policy() {
           existing={edit}
           onClose={() => setEdit(null)}
           onSubmit={async (v) => {
-            await patchKey({ ...v, key: undefined });
+            const body = { ...v };
+            if (!body.key) delete body.key;
+            await patchKey(body);
             setEdit(null);
             await load();
           }}
@@ -160,12 +162,21 @@ function BindModal({
           <label>{t("bind.name")}</label>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-        {!existing && (
-          <div className="form-row">
-            <label>{t("bind.key")}</label>
-            <input className="input" value={key} onChange={(e) => setKey(e.target.value)} autoComplete="off" />
+        <div className="form-row">
+          <label>{existing ? t("bind.keyRotate") : t("bind.key")}</label>
+          <input
+            className="input"
+            type="password"
+            value={key}
+            onChange={(e) => setKey(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder={existing ? existing.key_preview : ""}
+          />
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {existing ? t("bind.keyRotateHint") : t("bind.keyHint")}
           </div>
-        )}
+        </div>
         <div className="form-row">
           <label>{t("bind.daily")}</label>
           <input className="input" value={daily} onChange={(e) => setDaily(e.target.value)} />
@@ -181,7 +192,7 @@ function BindModal({
         {err && <div className="muted" style={{ color: "var(--danger)" }}>{err}</div>}
         <div className="fp-actions" style={{ marginTop: 12 }}>
           <button className="btn" type="button" onClick={onClose}>{t("bind.cancel")}</button>
-          <button className="btn primary" type="submit" disabled={busy}>{t("bind.submit")}</button>
+          <button className="btn primary" type="submit" disabled={busy}>{existing ? t("bind.save") : t("bind.submit")}</button>
         </div>
       </form>
     </div>
