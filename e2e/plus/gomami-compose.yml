@@ -31,12 +31,14 @@ services:
       CPA_MANAGEMENT_KEY: "${CPA_MANAGEMENT_KEY}"
       USAGE_COLLECTOR_MODE: "auto"
 
-  # Token-based tunnel: ingress/DNS are dashboard-owned.
-  # host network so a dashboard origin of http://localhost:8317 reaches CPA.
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
     pull_policy: always
     restart: unless-stopped
-    network_mode: host
-    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARED_TOKEN}"]
+    depends_on:
+      - cli-proxy-api
+      - cpa-manager-plus
+    command: ["tunnel", "--no-autoupdate", "--config", "/etc/cloudflared/config.yml", "run"]
+    volumes:
+      - ./cloudflared:/etc/cloudflared:ro
