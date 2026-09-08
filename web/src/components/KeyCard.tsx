@@ -9,10 +9,12 @@ export default function KeyCard({
   k,
   actions,
   selected,
+  onToggleSelect,
 }: {
   k: KeyPublic;
   actions?: ReactNode;
   selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const t = useT();
   const st = quotaStatus(k);
@@ -47,6 +49,12 @@ export default function KeyCard({
       className={"keycard" + (k.enabled ? "" : " disabled") + (over ? " over" : "") + (selected ? " selected" : "")}
     >
       <div className="kc-head">
+        <button
+          type="button"
+          className={"kc-check" + (selected ? " on" : "")}
+          aria-pressed={!!selected}
+          onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+        />
         <span className="kc-dot" />
         <span className="kc-name">{k.name}</span>
         <span className={"tag" + (k.enabled ? (over ? " off" : " on") : " off")}>{statusLabel}</span>

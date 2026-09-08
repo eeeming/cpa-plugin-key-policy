@@ -227,30 +227,32 @@ export default function Policy() {
     }
   };
 
+  const hasSel = selected.length > 0;
+
   return (
     <div>
-      <div className="fp-head" style={{ margin: "0 0 16px" }}>
+      <div className="quota-toolbar">
         <div className="fp-actions">
           <button className="btn primary sm" onClick={() => setShowBind(true)}>{t("keys.bind")}</button>
           <button className="btn sm" disabled={syncing} onClick={() => void sync()}>
             {syncing ? t("keys.syncing") : t("keys.sync")}
           </button>
         </div>
-        <button className="btn sm" onClick={() => void load()}>{t("keys.refresh")}</button>
-      </div>
-      {selected.length > 0 && (
-        <div className="fp-head sel-bar" style={{ margin: "0 0 16px" }}>
-          <div className="fp-actions">
-            <button className="btn sm" type="button" onClick={() => setSelected(selectAll(keyIds))}>{t("keys.selectAll")}</button>
-            <button className="btn sm" type="button" onClick={() => setSelected(invertSelection(selected, keyIds))}>{t("keys.invert")}</button>
-            <span className="muted">{t("keys.selectedCount", { count: selected.length })}</span>
-            <button className="btn sm" type="button" onClick={() => setShowBulk(true)}>{t("keys.setLimits")}</button>
-            <button className="btn sm" type="button" onClick={() => void resetSelected()}>{t("keys.reset")}</button>
-            <button className="btn sm" type="button" onClick={() => void disableSelected()}>{t("keys.disable")}</button>
-            <button className="btn sm danger-outline" type="button" onClick={() => void unbindSelected()}>{t("keys.unbind")}</button>
-          </div>
+        <span className="tb-split" aria-hidden="true" />
+        <div className="fp-actions">
+          <button className="btn sm" type="button" disabled={keys.length === 0} onClick={() => setSelected(selectAll(keyIds))}>{t("keys.selectAll")}</button>
+          <button className="btn sm" type="button" disabled={keys.length === 0} onClick={() => setSelected(invertSelection(selected, keyIds))}>{t("keys.invert")}</button>
+          <span className={"tb-count" + (hasSel ? " on" : "")}>{t("keys.selectedCount", { count: selected.length })}</span>
         </div>
-      )}
+        <span className="tb-split" aria-hidden="true" />
+        <div className="fp-actions">
+          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => setShowBulk(true)}>{t("keys.setLimits")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void resetSelected()}>{t("keys.reset")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void disableSelected()}>{t("keys.disable")}</button>
+          <button className="btn sm danger-outline" type="button" disabled={!hasSel} onClick={() => void unbindSelected()}>{t("keys.unbind")}</button>
+        </div>
+        <button className="btn sm tb-refresh" onClick={() => void load()}>{t("keys.refresh")}</button>
+      </div>
       {error && <div className="card" style={{ color: "var(--danger)" }}>{error}</div>}
       {notice && <div className="card" style={{ color: "var(--ok)" }}>{notice}</div>}
       {loading && <div className="muted">{t("keys.loading")}</div>}
@@ -268,6 +270,7 @@ export default function Policy() {
             key={k.id}
             k={k}
             selected={selected.includes(k.id)}
+            onToggleSelect={() => setSelected((cur) => toggleId(cur, k.id))}
             actions={(
               <>
                 <button className="btn sm" onClick={() => setEdit(k)}>{t("keys.edit")}</button>
