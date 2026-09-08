@@ -55,7 +55,8 @@
     "bulkDisableDone": "已停用 {{count}} 把。",
     "bulkUnbindConfirm": "解綁所選 {{count}} 把 Key？Plus api-keys 不會被刪除。",
     "bulkUnbindDone": "已解綁 {{count}} 把。",
-    "bulkFailed": "部分失敗：{{detail}}"
+    "bulkFailed": "部分失敗：{{detail}}",
+    "invalidLimits": "限額須為非負數，空表示不限。"
   },
   "bind": {
     "title": "绑定已有 Key",

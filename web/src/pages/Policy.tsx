@@ -31,9 +31,10 @@ export default function Policy() {
   const [edit, setEdit] = useState<KeyPublic | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [showBulk, setShowBulk] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ x: number; y: number; cardId?: string; dragging: boolean } | null>(null);
+  const dragRef = useRef<{ x: number; y: number; cardId?: string; dragging: boolean; moved: boolean } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,46 +89,68 @@ export default function Policy() {
     }
   };
 
-  const applyBulkLimits = async (daily: number, weekly: number, rpm: number) => {
-    const failures: string[] = [];
-    for (const id of selected) {
-      try {
-        await patchKey({ id, daily_limit_usd: daily, weekly_limit_usd: weekly, rpm });
-      } catch (e) {
-        failures.push(id + ": " + (e as Error).message);
-      }
-    }
-    if (failures.length) {
-      setError(t("keys.bulkFailed", { detail: failures.join("; ") }));
-    } else {
-      setNotice(t("keys.setLimitsDone", { count: selected.length }));
-    }
-    setShowBulk(false);
-    setSelected([]);
+  const finishBulk = async (result: { error?: string; notice?: string; clearSelection: boolean }) => {
     await load();
+    setError(result.error ?? "");
+    setNotice(result.notice ?? "");
+    if (result.clearSelection) setSelected([]);
+  };
+
+  const runBulk = async (work: (ids: string[]) => Promise<{ error?: string; notice?: string }>) => {
+    if (bulkBusy) return;
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await work(ids);
+      await finishBulk({ ...result, clearSelection: !result.error });
+    } catch (e) {
+      await finishBulk({ error: (e as Error).message, clearSelection: false });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const applyBulkLimits = async (daily: number, weekly: number, rpm: number) => {
+    await runBulk(async (ids) => {
+      const failures: string[] = [];
+      for (const id of ids) {
+        try {
+          await patchKey({ id, daily_limit_usd: daily, weekly_limit_usd: weekly, rpm });
+        } catch (e) {
+          failures.push(id + ": " + (e as Error).message);
+        }
+      }
+      setShowBulk(false);
+      if (failures.length) return { error: t("keys.bulkFailed", { detail: failures.join("; ") }) };
+      return { notice: t("keys.setLimitsDone", { count: ids.length }) };
+    });
   };
 
   const resetSelected = async () => {
     if (!confirm(t("keys.resetConfirm", { count: selected.length }))) return;
-    try {
-      const got = await resetWindows(selected);
-      setNotice(t("keys.resetDone", { count: got.reset, failed: (got.failed ?? []).length }));
+    await runBulk(async (ids) => {
+      const got = await resetWindows(ids);
       if (got.failed?.length) {
-        setError(t("keys.bulkFailed", { detail: got.failed.join(", ") }));
+        return {
+          notice: t("keys.resetDone", { count: got.reset, failed: got.failed.length }),
+          error: t("keys.bulkFailed", { detail: got.failed.join(", ") }),
+        };
       }
-      setSelected([]);
-      await load();
-    } catch (e) {
-      setError((e as Error).message);
-    }
+      return { notice: t("keys.resetDone", { count: got.reset, failed: 0 }) };
+    });
   };
 
   const resetOne = async (k: KeyPublic) => {
     if (!confirm(t("keys.resetOneConfirm", { name: k.name }))) return;
     try {
       const got = await resetWindows([k.id]);
-      setNotice(t("keys.resetDone", { count: got.reset, failed: (got.failed ?? []).length }));
       await load();
+      setNotice(t("keys.resetDone", { count: got.reset, failed: (got.failed ?? []).length }));
+      if (got.failed?.length) setError(t("keys.bulkFailed", { detail: got.failed.join(", ") }));
+      else setError("");
     } catch (e) {
       setError((e as Error).message);
     }
@@ -137,34 +160,34 @@ export default function Policy() {
     const confirmKey = enabled ? "keys.bulkEnableConfirm" : "keys.bulkDisableConfirm";
     const doneKey = enabled ? "keys.bulkEnableDone" : "keys.bulkDisableDone";
     if (!confirm(t(confirmKey, { count: selected.length }))) return;
-    const failures: string[] = [];
-    for (const id of selected) {
-      try {
-        await patchKey({ id, enabled });
-      } catch (e) {
-        failures.push(id + ": " + (e as Error).message);
+    await runBulk(async (ids) => {
+      const failures: string[] = [];
+      for (const id of ids) {
+        try {
+          await patchKey({ id, enabled });
+        } catch (e) {
+          failures.push(id + ": " + (e as Error).message);
+        }
       }
-    }
-    if (failures.length) setError(t("keys.bulkFailed", { detail: failures.join("; ") }));
-    else setNotice(t(doneKey, { count: selected.length }));
-    setSelected([]);
-    await load();
+      if (failures.length) return { error: t("keys.bulkFailed", { detail: failures.join("; ") }) };
+      return { notice: t(doneKey, { count: ids.length }) };
+    });
   };
 
   const unbindSelected = async () => {
     if (!confirm(t("keys.bulkUnbindConfirm", { count: selected.length }))) return;
-    const failures: string[] = [];
-    for (const id of selected) {
-      try {
-        await deleteKey(id);
-      } catch (e) {
-        failures.push(id + ": " + (e as Error).message);
+    await runBulk(async (ids) => {
+      const failures: string[] = [];
+      for (const id of ids) {
+        try {
+          await deleteKey(id);
+        } catch (e) {
+          failures.push(id + ": " + (e as Error).message);
+        }
       }
-    }
-    if (failures.length) setError(t("keys.bulkFailed", { detail: failures.join("; ") }));
-    else setNotice(t("keys.bulkUnbindDone", { count: selected.length }));
-    setSelected([]);
-    await load();
+      if (failures.length) return { error: t("keys.bulkFailed", { detail: failures.join("; ") }) };
+      return { notice: t("keys.bulkUnbindDone", { count: ids.length }) };
+    });
   };
 
   const pointInGrid = (e: React.PointerEvent) => {
@@ -184,17 +207,19 @@ export default function Policy() {
       y: pt.y,
       cardId: el.closest("[data-key-id]")?.getAttribute("data-key-id") ?? undefined,
       dragging: false,
+      moved: false,
     };
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const onGridPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current;
     if (!drag) return;
     const pt = pointInGrid(e);
-    if (!drag.dragging && Math.hypot(pt.x - drag.x, pt.y - drag.y) >= MARQUEE_MIN) {
-      if (window.matchMedia("(min-width: 641px)").matches) {
+    if (Math.hypot(pt.x - drag.x, pt.y - drag.y) >= MARQUEE_MIN) {
+      drag.moved = true;
+      if (!drag.dragging && window.matchMedia("(min-width: 641px)").matches) {
         drag.dragging = true;
+        e.currentTarget.setPointerCapture(e.pointerId);
       }
     }
     if (drag.dragging) {
@@ -224,6 +249,7 @@ export default function Policy() {
       setSelected((cur) => mergeSelection(cur, idsHitByMarquee(rect, cards)));
       return;
     }
+    if (drag.moved) return;
     if (drag.cardId) {
       setSelected((cur) => toggleId(cur, drag.cardId!));
     }
@@ -248,11 +274,11 @@ export default function Policy() {
         </div>
         <span className="tb-split" aria-hidden="true" />
         <div className="fp-actions">
-          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => setShowBulk(true)}>{t("keys.setLimits")}</button>
-          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void resetSelected()}>{t("keys.reset")}</button>
-          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void setEnabledSelected(true)}>{t("keys.enable")}</button>
-          <button className="btn sm" type="button" disabled={!hasSel} onClick={() => void setEnabledSelected(false)}>{t("keys.disable")}</button>
-          <button className="btn sm danger-outline" type="button" disabled={!hasSel} onClick={() => void unbindSelected()}>{t("keys.unbind")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => setShowBulk(true)}>{t("keys.setLimits")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => void resetSelected()}>{t("keys.reset")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => void setEnabledSelected(true)}>{t("keys.enable")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => void setEnabledSelected(false)}>{t("keys.disable")}</button>
+          <button className="btn sm danger-outline" type="button" disabled={!hasSel || bulkBusy} onClick={() => void unbindSelected()}>{t("keys.unbind")}</button>
         </div>
         <button className="btn sm tb-refresh" onClick={() => void load()}>{t("keys.refresh")}</button>
       </div>
@@ -352,7 +378,7 @@ function BulkLimitsModal({
     const w = weekly.trim() === "" ? 0 : Number(weekly);
     const r = rpm.trim() === "" ? 0 : Number(rpm);
     if ([d, w, r].some((n) => Number.isNaN(n) || n < 0)) {
-      setErr(t("keys.loadFailed"));
+      setErr(t("keys.invalidLimits"));
       return;
     }
     if (!confirm(t("keys.selectedCount", { count }) + " — " + t("keys.setLimits"))) return;

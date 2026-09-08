@@ -55,7 +55,8 @@
     "bulkDisableDone": "Disabled {{count}} keys.",
     "bulkUnbindConfirm": "Unbind {{count}} selected keys? Plus api-keys are not deleted.",
     "bulkUnbindDone": "Unbound {{count}} keys.",
-    "bulkFailed": "Some keys failed: {{detail}}"
+    "bulkFailed": "Some keys failed: {{detail}}",
+    "invalidLimits": "Limits must be non-negative numbers. Leave empty for unlimited."
   },
   "bind": {
     "title": "Bind existing key",

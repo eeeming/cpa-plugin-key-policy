@@ -269,7 +269,7 @@ th.num, td.num { text-align: right; }
 .quota-flash.ok { color: var(--ok); border-color: var(--ok-border); background: var(--ok-soft); }
 .quota-flash.err { color: var(--danger); border-color: var(--danger-border); background: var(--danger-soft); }
 
-.card-stack { display: flex; flex-direction: column; gap: 10px; position: relative; user-select: none; }
+.card-stack { display: flex; flex-direction: column; gap: 10px; position: relative; user-select: none; touch-action: pan-y; }
 .marquee {
   position: absolute;
   border: 1px dashed var(--accent);
