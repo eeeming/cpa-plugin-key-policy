@@ -8,9 +8,13 @@ import { formatUsd } from "../quota";
 export default function KeyCard({
   k,
   actions,
+  selected,
+  onToggleSelect,
 }: {
   k: KeyPublic;
   actions?: ReactNode;
+  selected?: boolean;
+  onToggleSelect?: () => void;
 }) {
   const t = useT();
   const st = quotaStatus(k);
@@ -40,9 +44,21 @@ export default function KeyCard({
   };
 
   return (
-    <div className={"keycard" + (k.enabled ? "" : " disabled") + (over ? " over" : "")}>
-      <div className="kc-head">
-        <span className="kc-dot" />
+    <div
+      data-key-id={k.id}
+      className={"keycard" + (k.enabled ? "" : " disabled") + (over ? " over" : "") + (selected ? " selected" : "")}
+    >
+      <label className={"kc-check" + (selected ? " on" : "")}>
+        <input
+          type="checkbox"
+          checked={!!selected}
+          onChange={() => onToggleSelect?.()}
+          aria-label={k.name}
+        />
+        <span className="kc-check-box" aria-hidden="true" />
+      </label>
+      <span className="kc-dot" />
+      <div className="kc-title">
         <span className="kc-name">{k.name}</span>
         <span className={"tag" + (k.enabled ? (over ? " off" : " on") : " off")}>{statusLabel}</span>
       </div>

@@ -175,6 +175,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodGet, Path: base + "/keys", Description: "List bound key quota policies."},
 			{Method: http.MethodPost, Path: base + "/keys", Description: "Bind an existing Plus api-key and set limits."},
 			{Method: http.MethodPost, Path: base + "/keys/sync", Description: "Import Plus api-keys that are not yet bound. Existing policies are left unchanged."},
+			{Method: http.MethodPost, Path: base + "/keys/reset-windows", Description: "Reset rolling usage windows for bound keys. Limit numbers are unchanged."},
 			{Method: http.MethodPatch, Path: base + "/keys", Description: "Update a bound key policy by id."},
 			{Method: http.MethodDelete, Path: base + "/keys", Description: "Unbind a key policy by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Usage for one bound key by id."},
@@ -205,6 +206,8 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(jsonResponse(http.StatusOK, map[string]any{"keys": a.publicKeys(a.store.Keys())}))
 	case req.Method == http.MethodPost && path == base+"/keys/sync":
 		return OKEnvelope(a.syncPlusKeys())
+	case req.Method == http.MethodPost && path == base+"/keys/reset-windows":
+		return OKEnvelope(a.resetWindows(req.Body))
 	case req.Method == http.MethodPost && path == base+"/keys":
 		return OKEnvelope(a.bindKey(req.Body))
 	case req.Method == http.MethodPatch && path == base+"/keys":
@@ -357,6 +360,29 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 		return jsonError(http.StatusBadRequest, "invalid_policy", err.Error())
 	}
 	return jsonResponse(http.StatusOK, map[string]any{"key": a.publicKeyFromConfig(*current)})
+}
+
+func (a *App) resetWindows(body []byte) ManagementResponse {
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		return jsonError(http.StatusBadRequest, "invalid_json", err.Error())
+	}
+	n := 0
+	for _, id := range req.IDs {
+		if strings.TrimSpace(id) != "" {
+			n++
+		}
+	}
+	if n == 0 {
+		return jsonError(http.StatusBadRequest, "missing_ids", "ids is required")
+	}
+	got, err := a.store.ResetWindows(req.IDs)
+	if err != nil {
+		return jsonError(http.StatusBadRequest, "reset_failed", err.Error())
+	}
+	return jsonResponse(http.StatusOK, got)
 }
 
 func (a *App) deleteKey(id string) ManagementResponse {
