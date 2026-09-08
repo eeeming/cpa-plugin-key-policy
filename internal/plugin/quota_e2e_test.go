@@ -44,13 +44,7 @@ func TestQuotaPipelineFromCPAMPPrices(t *testing.T) {
 	if !over.Terminate || over.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("over-limit: %+v", over)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(over.ResponseBody, &payload); err != nil {
-		t.Fatal(err)
-	}
-	if payload["error"].(map[string]any)["code"] != "daily_exceeded" {
-		t.Fatalf("429 body=%s", over.ResponseBody)
-	}
+	assertOpenAIQuotaError(t, over, "insufficient_quota")
 	usageRaw, err := app.HandleMethod(MethodManagementHandle, mustJSON(ManagementRequest{
 		Method: http.MethodGet,
 		Path:   "/v0/management/plugins/" + PluginID + "/keys/usage",
@@ -144,14 +138,7 @@ func TestQuotaPipeline(t *testing.T) {
 	if !over.Terminate || over.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("over-limit intercept hop failed: %+v", over)
 	}
-	var payload map[string]any
-	if err := json.Unmarshal(over.ResponseBody, &payload); err != nil {
-		t.Fatalf("429 body: %v %s", err, over.ResponseBody)
-	}
-	code, _ := payload["error"].(map[string]any)["code"].(string)
-	if code != "daily_exceeded" {
-		t.Fatalf("429 code = %q body=%s", code, over.ResponseBody)
-	}
+	assertOpenAIQuotaError(t, over, "insufficient_quota")
 	mark("intercept_over")
 
 	usageRawMgmt, err := app.HandleMethod(MethodManagementHandle, mustJSON(ManagementRequest{
@@ -201,6 +188,24 @@ func interceptBearer(t *testing.T, app *App, plain string) RequestInterceptRespo
 	return resp
 }
 
+func assertOpenAIQuotaError(t *testing.T, resp RequestInterceptResponse, wantCode string) {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal(resp.ResponseBody, &payload); err != nil {
+		t.Fatalf("429 body: %v %s", err, resp.ResponseBody)
+	}
+	errObj, _ := payload["error"].(map[string]any)
+	if errObj == nil {
+		t.Fatalf("missing error object: %s", resp.ResponseBody)
+	}
+	if errObj["code"] != wantCode || errObj["type"] != wantCode {
+		t.Fatalf("want type=code=%q, got type=%v code=%v body=%s", wantCode, errObj["type"], errObj["code"], resp.ResponseBody)
+	}
+	if _, ok := errObj["param"]; !ok {
+		t.Fatalf("official error object should include param: %s", resp.ResponseBody)
+	}
+}
+
 func TestQuotaDisabledAndUnboundNoopAndRPM(t *testing.T) {
 	app := configureApp(t)
 	app.Store().SetPriceLister(func() ([]policy.ModelPrice, error) {
@@ -248,10 +253,9 @@ func TestQuotaDisabledAndUnboundNoopAndRPM(t *testing.T) {
 	if !over.Terminate {
 		t.Fatal("second rpm should 429")
 	}
-	var payload map[string]any
-	_ = json.Unmarshal(over.ResponseBody, &payload)
-	if payload["error"].(map[string]any)["code"] != "rpm_exceeded" {
-		t.Fatalf("rpm body = %s", over.ResponseBody)
+	assertOpenAIQuotaError(t, over, "rate_limit_exceeded")
+	if over.ResponseHeaders.Get("Retry-After") != "60" {
+		t.Fatalf("Retry-After = %q", over.ResponseHeaders.Get("Retry-After"))
 	}
 }
 
@@ -276,11 +280,7 @@ func TestMissingPriceSourceUSDSilentRPMWorks(t *testing.T) {
 	if !over.Terminate {
 		t.Fatal("RPM should still fire")
 	}
-	var payload map[string]any
-	_ = json.Unmarshal(over.ResponseBody, &payload)
-	if payload["error"].(map[string]any)["code"] != "rpm_exceeded" {
-		t.Fatalf("want rpm_exceeded, got %s", over.ResponseBody)
-	}
+	assertOpenAIQuotaError(t, over, "rate_limit_exceeded")
 }
 
 var errUnavailable = errString("no plus")
@@ -304,11 +304,7 @@ func TestWeeklyExceededCode(t *testing.T) {
 	if !over.Terminate {
 		t.Fatal("expected weekly 429")
 	}
-	var payload map[string]any
-	_ = json.Unmarshal(over.ResponseBody, &payload)
-	if payload["error"].(map[string]any)["code"] != "weekly_exceeded" {
-		t.Fatalf("got %s", over.ResponseBody)
-	}
+	assertOpenAIQuotaError(t, over, "insufficient_quota")
 }
 
 func TestGETUsageQueryString(t *testing.T) {

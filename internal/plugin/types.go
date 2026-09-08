@@ -102,13 +102,14 @@ type RequestInterceptResponse struct {
 }
 
 type UsageHandleRequest struct {
-	Model        string      `json:"Model"`
-	Alias        string      `json:"Alias"`
-	APIKey       string      `json:"APIKey"`
-	Provider     string      `json:"Provider"`
-	ServiceTier  string      `json:"ServiceTier"`
-	Failed       bool        `json:"Failed"`
-	Detail       UsageDetail `json:"Detail"`
+	Model       string         `json:"Model"`
+	Alias       string         `json:"Alias"`
+	APIKey      string         `json:"APIKey"`
+	Provider    string         `json:"Provider"`
+	ServiceTier string         `json:"ServiceTier"`
+	Failed      bool           `json:"Failed"`
+	Detail      UsageDetail    `json:"Detail"`
+	Metadata    map[string]any `json:"Metadata"`
 }
 
 type UsageDetail struct {

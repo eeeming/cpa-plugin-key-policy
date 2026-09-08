@@ -1,8 +1,10 @@
 package policy
 
 import (
+	"fmt"
 	"net/http"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -106,11 +108,11 @@ func TestRecordUsageMatchesPlusInputOutputCacheSplit(t *testing.T) {
 	}
 	store.SetPriceLister(func() ([]ModelPrice, error) { return list, nil })
 	bindTestKey(t, store, "paid", "sk-paid", 100, 100)
-	// Live gomami 李益茗 gpt-5.6-sol aggregate: uncached 92686, cache 423424, out 4043.
+	// Synthetic subset-provider split: uncached 100000, cache-read 400000, out 4000.
 	cost := store.RecordUsage("sk-paid", "gpt-5.6-sol", "gpt-5.6-sol", "openai", "standard", false, UsageDetail{
-		InputTokens: 92686 + 423424, OutputTokens: 4043, CacheReadTokens: 423424,
+		InputTokens: 100000 + 400000, OutputTokens: 4000, CacheReadTokens: 400000,
 	})
-	want := 92686.0*5/1e6 + 423424.0*0.5/1e6 + 4043.0*30/1e6
+	want := 100000.0*5/1e6 + 400000.0*0.5/1e6 + 4000.0*30/1e6
 	if !nearly(cost, want) {
 		t.Fatalf("cost = %v want %v", cost, want)
 	}
@@ -134,6 +136,43 @@ func TestRecordUsageRepricesCacheWritesAndPriority(t *testing.T) {
 	want := 750.0*10/1e6 + 200.0*1/1e6 + 50.0*12.5/1e6 + 100.0*60/1e6
 	if !nearly(cost, want) {
 		t.Fatalf("priority+write cost = %v want %v", cost, want)
+	}
+}
+
+func TestPriceFetchErrorKeepsLastGoodTable(t *testing.T) {
+	store := configureQuotaStore(t)
+	ok := true
+	calls := 0
+	store.SetPriceLister(func() ([]ModelPrice, error) {
+		calls++
+		if !ok {
+			return nil, errUnavailable
+		}
+		return []ModelPrice{{Model: "m", ServiceTier: "*", InputPricePerMillion: 1000, Enabled: true}}, nil
+	})
+	bindTestKey(t, store, "paid", "sk-paid", 100, 1)
+	if !store.PricesAvailable() {
+		t.Fatal("expected first fetch to succeed")
+	}
+	ok = false
+	if !store.PricesAvailable() {
+		t.Fatal("transient Plus error must keep last good prices")
+	}
+	if calls != 1 {
+		t.Fatalf("still inside TTL: calls=%d", calls)
+	}
+	store.priceFetchedAt = time.Now().Add(-time.Minute)
+	if !store.PricesAvailable() {
+		t.Fatal("expired TTL with last-good table should still report prices")
+	}
+	if calls != 2 {
+		t.Fatalf("one retry after TTL: calls=%d", calls)
+	}
+	if !store.PricesAvailable() {
+		t.Fatal("backoff window should still serve last-good prices")
+	}
+	if calls != 2 {
+		t.Fatalf("error must not refetch inside TTL: calls=%d", calls)
 	}
 }
 
@@ -163,6 +202,34 @@ type errString string
 
 func (e errString) Error() string { return string(e) }
 
+func TestKeysOrderedByLastAccess(t *testing.T) {
+	store := NewStore()
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	store.SetClock(func() time.Time { return now })
+	if err := store.Configure(Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state.json")}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.StopUsageFlusher)
+	bindTestKey(t, store, "older", "sk-older", 10, 0)
+	bindTestKey(t, store, "newer", "sk-newer", 10, 0)
+	listed := store.Keys()
+	if len(listed) != 2 || listed[0].ID != "newer" {
+		t.Fatalf("unused keys should put newest created first: %+v", listed)
+	}
+	now = now.Add(time.Minute)
+	_ = store.Admit(http.Header{"Authorization": {"Bearer sk-older"}}, nil, nil)
+	listed = store.Keys()
+	if listed[0].ID != "older" {
+		t.Fatalf("last access should be first: %+v", listed)
+	}
+	now = now.Add(time.Minute)
+	_ = store.Admit(http.Header{"Authorization": {"Bearer sk-newer"}}, nil, nil)
+	listed = store.Keys()
+	if listed[0].ID != "newer" {
+		t.Fatalf("newer access should move to front: %+v", listed)
+	}
+}
+
 func TestCallerScopeLookup(t *testing.T) {
 	store := configureQuotaStore(t)
 	bindTestKey(t, store, "scoped", "sk-scoped", 10, 0)
@@ -186,5 +253,132 @@ func TestDisabledKeyUsageNotRecorded(t *testing.T) {
 	}
 	if cost := store.RecordUsage("sk-off", "m", "m", "", "*", false, UsageDetail{InputTokens: 1000}); cost != 0 {
 		t.Fatalf("disabled billed %v", cost)
+	}
+}
+
+func TestDailyAndWeeklyWindowsRollFromFirstUse(t *testing.T) {
+	now := time.Date(2026, 9, 8, 15, 4, 0, 0, time.UTC)
+	ledger := newUsageLedger(func() time.Time { return now })
+	key := KeyConfig{ID: "k", DailyLimitUSD: 10, WeeklyLimitUSD: 50}
+
+	before := ledger.Summary(key)
+	if before.DailyResetAt != nil || before.WeeklyResetAt != nil {
+		t.Fatalf("unused key should have no reset times: %+v", before)
+	}
+
+	ledger.RecordCost("k", "m", 1, 0, 0, 1, 0, 1)
+	s := ledger.Summary(key)
+	if !nearly(s.DailyUSD, 1) || !nearly(s.WeeklyUSD, 1) {
+		t.Fatalf("after first bill: %+v", s)
+	}
+	if s.DailyResetAt == nil || !s.DailyResetAt.Equal(now.Add(24*time.Hour)) {
+		t.Fatalf("daily reset = %v, want %v", s.DailyResetAt, now.Add(24*time.Hour))
+	}
+	if s.WeeklyResetAt == nil || !s.WeeklyResetAt.Equal(now.Add(7*24*time.Hour)) {
+		t.Fatalf("weekly reset = %v, want %v", s.WeeklyResetAt, now.Add(7*24*time.Hour))
+	}
+
+	// Crossing UTC midnight must not reset a rolling 24h window.
+	now = now.Add(12 * time.Hour) // 2026-09-09 03:04 UTC
+	s = ledger.Summary(key)
+	if !nearly(s.DailyUSD, 1) {
+		t.Fatalf("still inside 24h after midnight: %+v", s)
+	}
+
+	now = now.Add(13 * time.Hour) // 25h from start
+	s = ledger.Summary(key)
+	if !nearly(s.DailyUSD, 0) {
+		t.Fatalf("daily should roll after 24h: %+v", s)
+	}
+	if s.DailyResetAt != nil {
+		t.Fatalf("idle expired daily must omit reset: %+v", s)
+	}
+	if !nearly(s.WeeklyUSD, 1) {
+		t.Fatalf("weekly still open: %+v", s)
+	}
+
+	now = now.Add(7 * 24 * time.Hour)
+	s = ledger.Summary(key)
+	if !nearly(s.WeeklyUSD, 0) {
+		t.Fatalf("weekly should roll after 7d: %+v", s)
+	}
+	if s.WeeklyResetAt != nil {
+		t.Fatalf("idle expired weekly must omit reset: %+v", s)
+	}
+}
+
+func TestUsageSnapshotCopiesByAlias(t *testing.T) {
+	now := time.Date(2026, 9, 8, 12, 0, 0, 0, time.UTC)
+	ledger := newUsageLedger(func() time.Time { return now })
+	ledger.RecordCost("k", "m", 1, 0, 0, 10, 1, 1)
+	snap := ledger.snapshot()
+	ledger.RecordCost("k", "m", 2, 0, 0, 10, 1, 1)
+	if got := snap["k"].Daily.TotalUSD; got != 1 {
+		t.Fatalf("snapshot daily = %v, want 1", got)
+	}
+	if got := snap["k"].ByAlias["m"].Daily.TotalUSD; got != 1 {
+		t.Fatalf("snapshot by_alias mutated after RecordCost: %v", got)
+	}
+	if got := ledger.entries["k"].ByAlias["m"].Daily.TotalUSD; got != 3 {
+		t.Fatalf("live by_alias = %v, want 3", got)
+	}
+}
+
+func TestPersistKeepsMemoryAndDiskAlignedUnderConcurrency(t *testing.T) {
+	store := configureQuotaStore(t)
+	store.SetPriceLister(func() ([]ModelPrice, error) {
+		return []ModelPrice{{
+			Model: "m", ServiceTier: "*", InputPricePerMillion: 1000, Enabled: true,
+		}}, nil
+	})
+	bindTestKey(t, store, "paid", "sk-paid", 0, 0)
+
+	const n = 40
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			store.RecordUsage("sk-paid", "m", "m", "openai", "standard", false, UsageDetail{InputTokens: 1000})
+			_ = store.FlushUsage()
+		}()
+	}
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			k := store.Keys()[0]
+			k.Name = fmt.Sprintf("paid-%d", i)
+			if err := store.UpsertKey(k, true); err != nil {
+				t.Errorf("upsert: %v", err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	if err := store.FlushUsage(); err != nil {
+		t.Fatal(err)
+	}
+
+	mem := store.UsageSummaryFor(store.Keys()[0])
+	want := float64(n) // 1000 tokens @ $1000/M
+	if !nearly(mem.DailyUSD, want) {
+		t.Fatalf("memory daily = %v, want %v", mem.DailyUSD, want)
+	}
+	st, err := LoadState(store.StatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Keys) != 1 || st.Keys[0].ID != "paid" {
+		t.Fatalf("keys = %+v", st.Keys)
+	}
+	disk := st.Usage["paid"]
+	if disk == nil {
+		t.Fatal("missing disk usage")
+	}
+	if !nearly(disk.Daily.TotalUSD, mem.DailyUSD) {
+		t.Fatalf("disk daily = %v, memory = %v", disk.Daily.TotalUSD, mem.DailyUSD)
+	}
+	if !nearly(disk.ByAlias["m"].Daily.TotalUSD, mem.DailyUSD) {
+		t.Fatalf("disk by_alias = %+v", disk.ByAlias["m"])
 	}
 }

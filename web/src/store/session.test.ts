@@ -16,12 +16,14 @@ describe("session storage", () => {
   });
 
   it("stores base url and key in memory", () => {
+    localStorage.clear();
     setSession("http://localhost:8317/", "secret-xyz");
     const s = getSession();
     expect(s).not.toBeNull();
     expect(s!.baseUrl).toBe("http://localhost:8317");
     expect(s!.secretKey).toBe("secret-xyz");
     expect(isAuthed()).toBe(true);
+    expect(localStorage.length).toBe(0);
   });
 
   it("adds http:// scheme when missing", () => {

@@ -2,6 +2,8 @@ package policy
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -54,6 +56,33 @@ func TestExtractAPIKey(t *testing.T) {
 func TestPreviewKey(t *testing.T) {
 	if got := PreviewKey("cpa_abcdefghijklmnopqrstuvwxyz"); got != "cpa_abc...vwxyz" {
 		t.Fatalf("PreviewKey() = %q", got)
+	}
+	short := "sk-short"
+	if got := PreviewKey(short); got == short || !strings.Contains(got, "...") {
+		t.Fatalf("short preview must not equal plaintext: %q", got)
+	}
+	if got := SanitizeStoredPreview("sk-bound"); got != "***" {
+		t.Fatalf("stale short preview = %q", got)
+	}
+	masked := "sk-abcde...vwxyz"
+	if got := SanitizeStoredPreview(masked); got != masked {
+		t.Fatalf("already masked preview rewritten: %q", got)
+	}
+}
+
+func TestLoadStateRemasksShortPreview(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "state.json")
+	raw := []byte(`{"version":1,"keys":[{"id":"k1","name":"k1","key_hash":"sha256:abc","key_preview":"sk-bound"}]}`)
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Keys[0].KeyPreview != "***" {
+		t.Fatalf("preview = %q, want remasked", st.Keys[0].KeyPreview)
 	}
 }
 

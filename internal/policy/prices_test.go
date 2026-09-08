@@ -128,6 +128,34 @@ func TestParseCPAMPPricesExpandsContextAndServiceTiers(t *testing.T) {
 	}
 }
 
+func TestMatchPlusPriceUsesListedNameNotFamilyPrefix(t *testing.T) {
+	// Prices come from Plus JSON keys. A newly published model is billed as
+	// soon as it appears in the table; there is no gpt-5*/gpt-6* (or any
+	// other) family hardcoding in the matcher.
+	raw := []byte(`{"prices":{
+		"gpt-6-codex":{"prompt":1.25,"completion":10,"cacheRead":0.125,"cacheCreation":1.5625},
+		"lab-model-v3":{"prompt":0.2,"completion":0.8}
+	}}`)
+	list, err := ParseModelPrices(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	codex, ok := MatchPlusPrice(list, "openai", "gpt-6-codex", "", "standard", 1000)
+	if !ok || codex.InputPricePerMillion != 1.25 || codex.OutputPricePerMillion != 10 {
+		t.Fatalf("listed gpt-6-codex = %+v ok=%v", codex, ok)
+	}
+	lab, ok := MatchPlusPrice(list, "", "lab-model-v3", "", "priority", 1000)
+	if !ok || lab.InputPricePerMillion != 0.2 || lab.OutputPricePerMillion != 0.8 {
+		t.Fatalf("listed lab-model-v3 = %+v ok=%v", lab, ok)
+	}
+	if _, ok := MatchPlusPrice(list, "openai", "gpt-6", "", "standard", 1000); ok {
+		t.Fatal("unlisted sibling name must not inherit a family prefix")
+	}
+	if _, ok := MatchPlusPrice(list, "openai", "gpt-5.6-sol", "", "standard", 1000); ok {
+		t.Fatal("unlisted older family name must not match")
+	}
+}
+
 func TestHTTPPriceLister(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v0/management/billing/model-prices" {

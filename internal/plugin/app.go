@@ -112,35 +112,42 @@ func (a *App) interceptBefore(raw []byte) ([]byte, error) {
 	if !decision.Terminate {
 		return OKEnvelope(RequestInterceptResponse{})
 	}
-	code := decision.Reason
-	if code == "" {
-		code = "rate_limit_exceeded"
-	}
+	errType, errCode, message := quotaClientError(decision.Reason)
 	body, _ := json.Marshal(map[string]any{
 		"error": map[string]any{
-			"message": quotaMessage(code),
-			"type":    "rate_limit_error",
-			"code":    code,
+			"message": message,
+			"type":    errType,
+			"param":   nil,
+			"code":    errCode,
 		},
 	})
+	headers := http.Header{"Content-Type": []string{"application/json"}}
+	if errCode == "rate_limit_exceeded" {
+		headers.Set("Retry-After", "60")
+	}
 	return OKEnvelope(RequestInterceptResponse{
 		Terminate:       true,
 		StatusCode:      decision.StatusCode,
-		ResponseHeaders: http.Header{"Content-Type": []string{"application/json"}},
+		ResponseHeaders: headers,
 		ResponseBody:    body,
 	})
 }
 
-func quotaMessage(code string) string {
-	switch code {
+// quotaClientError maps the plugin's internal admit reason onto OpenAI's
+// public 429 codes: USD caps → insufficient_quota, RPM → rate_limit_exceeded.
+func quotaClientError(reason string) (errType, code, message string) {
+	switch reason {
 	case "daily_exceeded":
-		return "daily USD limit exceeded"
+		return "insufficient_quota", "insufficient_quota",
+			"You exceeded your current quota, please check your plan and billing details. (daily USD limit)"
 	case "weekly_exceeded":
-		return "weekly USD limit exceeded"
+		return "insufficient_quota", "insufficient_quota",
+			"You exceeded your current quota, please check your plan and billing details. (weekly USD limit)"
 	case "rpm_exceeded":
-		return "requests-per-minute limit exceeded"
+		return "rate_limit_exceeded", "rate_limit_exceeded",
+			"Rate limit reached for requests-per-minute."
 	default:
-		return "quota exceeded"
+		return "rate_limit_exceeded", "rate_limit_exceeded", "quota exceeded"
 	}
 }
 
@@ -149,7 +156,7 @@ func (a *App) handleUsage(raw []byte) ([]byte, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return OKEnvelope(UsageHandleResponse{})
 	}
-	_ = a.store.RecordUsage(req.APIKey, req.Alias, req.Model, req.Provider, req.ServiceTier, req.Failed, policy.UsageDetail{
+	_ = a.store.RecordUsageMeta(req.APIKey, req.Alias, req.Model, req.Provider, req.ServiceTier, req.Failed, policy.UsageDetail{
 		InputTokens:         req.Detail.InputTokens,
 		OutputTokens:        req.Detail.OutputTokens,
 		ReasoningTokens:     req.Detail.ReasoningTokens,
@@ -157,7 +164,7 @@ func (a *App) handleUsage(raw []byte) ([]byte, error) {
 		CacheReadTokens:     req.Detail.CacheReadTokens,
 		CacheCreationTokens: req.Detail.CacheCreationTokens,
 		TotalTokens:         req.Detail.TotalTokens,
-	})
+	}, req.Metadata)
 	return OKEnvelope(UsageHandleResponse{})
 }
 
@@ -167,6 +174,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 		Routes: []ManagementRoute{
 			{Method: http.MethodGet, Path: base + "/keys", Description: "List bound key quota policies."},
 			{Method: http.MethodPost, Path: base + "/keys", Description: "Bind an existing Plus api-key and set limits."},
+			{Method: http.MethodPost, Path: base + "/keys/sync", Description: "Import Plus api-keys that are not yet bound. Existing policies are left unchanged."},
 			{Method: http.MethodPatch, Path: base + "/keys", Description: "Update a bound key policy by id."},
 			{Method: http.MethodDelete, Path: base + "/keys", Description: "Unbind a key policy by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Usage for one bound key by id."},
@@ -195,6 +203,8 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 	switch {
 	case req.Method == http.MethodGet && path == base+"/keys":
 		return OKEnvelope(jsonResponse(http.StatusOK, map[string]any{"keys": a.publicKeys(a.store.Keys())}))
+	case req.Method == http.MethodPost && path == base+"/keys/sync":
+		return OKEnvelope(a.syncPlusKeys())
 	case req.Method == http.MethodPost && path == base+"/keys":
 		return OKEnvelope(a.bindKey(req.Body))
 	case req.Method == http.MethodPatch && path == base+"/keys":
@@ -231,6 +241,22 @@ type publicKey struct {
 	Usage          policy.UsageSummary `json:"usage"`
 	CreatedAt      string              `json:"created_at,omitempty"`
 	UpdatedAt      string              `json:"updated_at,omitempty"`
+	LastAccessAt   string              `json:"last_access_at,omitempty"`
+}
+
+func (a *App) syncPlusKeys() ManagementResponse {
+	got, err := a.store.SyncFromPlus()
+	if err != nil {
+		msg := err.Error()
+		status := http.StatusBadGateway
+		code := "plus_sync_failed"
+		if strings.Contains(msg, "plus_base_url is empty") {
+			status = http.StatusBadRequest
+			code = "plus_not_configured"
+		}
+		return jsonError(status, code, msg)
+	}
+	return jsonResponse(http.StatusOK, got)
 }
 
 func (a *App) bindKey(body []byte) ManagementResponse {
@@ -262,6 +288,7 @@ func (a *App) bindKey(body []byte) ManagementResponse {
 	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
 		name = strings.TrimSpace(*req.Name)
 	}
+	name = nameWithoutPlaintext(name, plain)
 	item := policy.KeyConfig{
 		ID:             id,
 		Name:           name,
@@ -315,14 +342,16 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 	if req.WeeklyLimitUSD != nil {
 		current.WeeklyLimitUSD = *req.WeeklyLimitUSD
 	}
-	if strings.TrimSpace(req.Key) != "" {
-		hash, err := policy.HashKey(req.Key)
+	plain := strings.TrimSpace(req.Key)
+	if plain != "" {
+		hash, err := policy.HashKey(plain)
 		if err != nil {
 			return jsonError(http.StatusBadRequest, "invalid_key", err.Error())
 		}
 		current.KeyHash = hash
-		current.KeyPreview = policy.PreviewKey(req.Key)
-		current.CallerScope = policy.CallerScope(req.Key)
+		current.KeyPreview = policy.PreviewKey(plain)
+		current.CallerScope = policy.CallerScope(plain)
+		current.Name = nameWithoutPlaintext(current.Name, plain)
 	}
 	if err := a.store.UpsertKey(*current, true); err != nil {
 		return jsonError(http.StatusBadRequest, "invalid_policy", err.Error())
@@ -351,16 +380,20 @@ func (a *App) keyUsage(id string) ManagementResponse {
 	}
 	summary := a.store.UsageSummaryFor(key)
 	return jsonResponse(http.StatusOK, map[string]any{
-		"key_id":            key.ID,
-		"key_name":          key.Name,
-		"enabled":           key.Enabled,
-		"daily_limit_usd":   key.DailyLimitUSD,
-		"weekly_limit_usd":  key.WeeklyLimitUSD,
-		"daily_usd":         summary.DailyUSD,
-		"weekly_usd":        summary.WeeklyUSD,
-		"daily_call_count":  summary.DailyCallCount,
-		"weekly_call_count": summary.WeeklyCallCount,
-		"models":            models,
+		"key_id":              key.ID,
+		"key_name":            key.Name,
+		"enabled":             key.Enabled,
+		"daily_limit_usd":     key.DailyLimitUSD,
+		"weekly_limit_usd":    key.WeeklyLimitUSD,
+		"daily_usd":           summary.DailyUSD,
+		"weekly_usd":          summary.WeeklyUSD,
+		"daily_call_count":    summary.DailyCallCount,
+		"weekly_call_count":   summary.WeeklyCallCount,
+		"daily_window_start":  summary.DailyWindowStart,
+		"weekly_window_start": summary.WeeklyWindowStart,
+		"daily_reset_at":      summary.DailyResetAt,
+		"weekly_reset_at":     summary.WeeklyResetAt,
+		"models":              models,
 	})
 }
 
@@ -410,7 +443,19 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 	if !key.UpdatedAt.IsZero() {
 		out.UpdatedAt = key.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z07:00")
 	}
+	if !key.LastAccessAt.IsZero() {
+		out.LastAccessAt = key.LastAccessAt.UTC().Format("2006-01-02T15:04:05Z07:00")
+	}
 	return out
+}
+
+func nameWithoutPlaintext(name, plain string) string {
+	name = strings.TrimSpace(name)
+	plain = strings.TrimSpace(plain)
+	if plain != "" && (name == plain || strings.Contains(name, plain)) {
+		return policy.PreviewKey(plain)
+	}
+	return name
 }
 
 func applyFloat64(v *float64, def float64) float64 {

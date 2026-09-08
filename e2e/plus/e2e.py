@@ -191,10 +191,10 @@ def main() -> int:
     status_code, payload, _ = chat(BOUND)
     if status_code != 429:
         fail(f"over daily expected 429, got {status_code} {payload}")
-    elif error_code(payload) != "daily_exceeded":
+    elif error_code(payload) != "insufficient_quota":
         fail(f"over daily code={error_code(payload)} payload={payload}")
     else:
-        ok("over daily → 429 daily_exceeded")
+        ok("over daily → 429 insufficient_quota")
 
     status_code, payload, _ = chat(UNBOUND)
     if status_code != 200:
@@ -218,10 +218,10 @@ def main() -> int:
     status_code, payload, _ = chat(RPM_KEY)
     if status_code != 429:
         fail(f"rpm second expected 429, got {status_code} {payload}")
-    elif error_code(payload) != "rpm_exceeded":
+    elif error_code(payload) != "rate_limit_exceeded":
         fail(f"rpm code={error_code(payload)} payload={payload}")
     else:
-        ok("rpm → 429 rpm_exceeded")
+        ok("rpm → 429 rate_limit_exceeded")
 
     dump_status()
     if failures:

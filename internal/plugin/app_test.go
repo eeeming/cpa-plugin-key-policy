@@ -3,6 +3,7 @@ package plugin
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -140,6 +141,113 @@ func TestPatchRotatesPlaintextWithoutStoringIt(t *testing.T) {
 	}
 }
 
+func TestBindAndSyncOmitPlaintextFromStateAndList(t *testing.T) {
+	app := configureApp(t)
+	plain := "sk-test-secret-aaaaaaaa"
+	bind := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id": "sec", "name": "sec", "key": plain, "daily_limit_usd": 1,
+	}))
+	if bind.StatusCode != http.StatusCreated {
+		t.Fatalf("bind = %d %s", bind.StatusCode, bind.Body)
+	}
+	if strings.Contains(string(bind.Body), plain) {
+		t.Fatalf("bind response leaked plaintext")
+	}
+
+	listed := callManagement(t, app, http.MethodGet, "/v0/management/plugins/cpa-key-quota/keys", nil)
+	if listed.StatusCode != http.StatusOK {
+		t.Fatalf("list = %d %s", listed.StatusCode, listed.Body)
+	}
+	if strings.Contains(string(listed.Body), plain) || strings.Contains(string(listed.Body), `"key_hash"`) {
+		t.Fatalf("list leaked plaintext or hash: %s", listed.Body)
+	}
+	if !strings.Contains(string(listed.Body), `"key_preview"`) {
+		t.Fatalf("list missing preview: %s", listed.Body)
+	}
+
+	status := callManagement(t, app, http.MethodGet, "/v0/management/plugins/cpa-key-quota/status", nil)
+	if strings.Contains(string(status.Body), plain) || strings.Contains(string(status.Body), `"key_hash"`) {
+		t.Fatalf("status leaked identity: %s", status.Body)
+	}
+
+	path := app.Store().StatePath()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), plain) {
+		t.Fatal("state file leaked plaintext")
+	}
+	st, err := policy.LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Keys) != 1 || !strings.HasPrefix(st.Keys[0].KeyHash, policy.HashPrefix) || st.Keys[0].KeyPreview == "" || st.Keys[0].KeyPreview == plain {
+		t.Fatalf("state identity = %+v", st.Keys)
+	}
+
+	syncPlain := "sk-test-secret-bbbbbbbb"
+	app.Store().SetAPIKeyLister(func() ([]policy.PlusAPIKey, error) {
+		return []policy.PlusAPIKey{
+			{Plain: plain},
+			{Plain: syncPlain, Name: syncPlain},
+		}, nil
+	})
+	synced := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys/sync", nil)
+	if synced.StatusCode != http.StatusOK {
+		t.Fatalf("sync = %d %s", synced.StatusCode, synced.Body)
+	}
+	if strings.Contains(string(synced.Body), syncPlain) {
+		t.Fatal("sync response leaked plaintext")
+	}
+	raw, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), syncPlain) || strings.Contains(string(raw), plain) {
+		t.Fatal("state file leaked sync plaintext")
+	}
+	st, err = policy.LoadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Keys) != 2 {
+		t.Fatalf("keys after sync = %+v", st.Keys)
+	}
+	for _, k := range st.Keys {
+		if k.Name == syncPlain || k.KeyPreview == syncPlain || !strings.HasPrefix(k.KeyHash, policy.HashPrefix) {
+			t.Fatalf("synced identity leaked or missing hash: %+v", k)
+		}
+	}
+}
+
+func TestPatchNameDoesNotStorePlaintext(t *testing.T) {
+	app := configureApp(t)
+	plain := "sk-rotate-secret-cccccccc"
+	bind := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id": "sec", "name": "team", "key": "sk-old-secret-dddddddd", "daily_limit_usd": 1,
+	}))
+	if bind.StatusCode != http.StatusCreated {
+		t.Fatalf("bind = %d %s", bind.StatusCode, bind.Body)
+	}
+	patched := callManagement(t, app, http.MethodPatch, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id": "sec", "name": plain, "key": plain,
+	}))
+	if patched.StatusCode != http.StatusOK {
+		t.Fatalf("patch = %d %s", patched.StatusCode, patched.Body)
+	}
+	if strings.Contains(string(patched.Body), plain) {
+		t.Fatalf("patch response leaked plaintext: %s", patched.Body)
+	}
+	raw, err := os.ReadFile(app.Store().StatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), plain) {
+		t.Fatal("state file leaked patched plaintext name")
+	}
+}
+
 func TestBindRequiresPlaintext(t *testing.T) {
 	app := configureApp(t)
 	resp := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys", []byte(`{"id":"x","name":"x"}`))
@@ -187,5 +295,62 @@ func TestCallerScopeFromMetadata(t *testing.T) {
 	decodeEnvelope(t, raw, &resp)
 	if resp.Terminate {
 		t.Fatalf("bound via caller_scope should admit: %+v", resp)
+	}
+}
+
+func TestSyncPlusKeysImportsMissing(t *testing.T) {
+	app := configureApp(t)
+	callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id": "keep", "name": "keep", "key": "sk-keep", "daily_limit_usd": 2,
+	}))
+	app.Store().SetAPIKeyLister(func() ([]policy.PlusAPIKey, error) {
+		return []policy.PlusAPIKey{{Plain: "sk-keep"}, {Plain: "sk-imported", Name: "Imported"}}, nil
+	})
+	resp := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys/sync", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sync = %d %s", resp.StatusCode, resp.Body)
+	}
+	var got policy.SyncResult
+	if err := json.Unmarshal(resp.Body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Added != 1 || got.Skipped != 1 || got.Total != 2 {
+		t.Fatalf("sync result = %+v", got)
+	}
+	listed := callManagement(t, app, http.MethodGet, "/v0/management/plugins/cpa-key-quota/keys", nil)
+	var payload struct {
+		Keys []publicKey `json:"keys"`
+	}
+	if err := json.Unmarshal(listed.Body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Keys) != 2 {
+		t.Fatalf("keys = %+v", payload.Keys)
+	}
+}
+
+func TestQuotaClientErrorMatchesOpenAI(t *testing.T) {
+	typ, code, msg := quotaClientError("daily_exceeded")
+	if typ != "insufficient_quota" || code != "insufficient_quota" {
+		t.Fatalf("daily = %s %s", typ, code)
+	}
+	if msg == "" {
+		t.Fatal("daily message empty")
+	}
+	typ, code, _ = quotaClientError("weekly_exceeded")
+	if typ != "insufficient_quota" || code != "insufficient_quota" {
+		t.Fatalf("weekly = %s %s", typ, code)
+	}
+	typ, code, _ = quotaClientError("rpm_exceeded")
+	if typ != "rate_limit_exceeded" || code != "rate_limit_exceeded" {
+		t.Fatalf("rpm = %s %s", typ, code)
+	}
+}
+
+func TestSyncPlusKeysRequiresPlus(t *testing.T) {
+	app := configureApp(t)
+	resp := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys/sync", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d %s", resp.StatusCode, resp.Body)
 	}
 }

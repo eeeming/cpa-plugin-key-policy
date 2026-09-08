@@ -1,8 +1,6 @@
 {
   "header": {
     "title": "cpa-key-quota",
-    "policy": "Policies",
-    "usage": "Usage",
     "logout": "Log out"
   },
   "login": {
@@ -26,7 +24,12 @@
     "loading": "Loading…",
     "loadFailed": "Failed to load",
     "empty": "No bound keys. Unlisted keys are unlimited.",
-    "bind": "Bind",
+    "bind": "Add",
+    "sync": "Sync",
+    "syncing": "Syncing…",
+    "syncConfirm": "Import Plus api-keys that are not bound yet. Plus does not send names, so new keys use the preview as the name (you can edit it). Existing policies are left unchanged. New keys start unlimited.",
+    "syncDone": "Synced: added {{added}}, already bound {{skipped}}, Plus total {{total}}.",
+    "syncFailed": "Sync failed",
     "edit": "Edit",
     "disable": "Disable",
     "enable": "Enable",
@@ -34,15 +37,8 @@
     "unbindConfirm": "Unbind {{id}}? Plus api-keys are not deleted.",
     "enabled": "Enabled",
     "disabled": "Disabled",
-    "colName": "Name",
-    "colPreview": "Key preview",
-    "colDaily": "Daily",
-    "colWeekly": "Weekly",
-    "colRpm": "RPM",
-    "colStatus": "Status",
-    "colActions": "Actions",
-    "unlimited": "Unlimited",
-    "notice": "The key must already exist in Plus api-keys. This plugin only enforces quota. Change prices in the Plus price table."
+    "colDaily": "Daily (24h)",
+    "unlimited": "Unlimited"
   },
   "bind": {
     "title": "Bind existing key",
@@ -51,23 +47,23 @@
     "keyHint": "Used only to compute a hash. Disk and list keep sha256 + preview, never the secret.",
     "keyRotate": "Replace key plaintext (optional)",
     "keyRotateHint": "Leave blank to keep the current binding. A new value is hashed immediately and is not stored.",
-    "daily": "Daily USD (empty = unlimited)",
-    "weekly": "Weekly USD (empty = unlimited)",
+    "daily": "Daily USD (empty = unlimited, rolling 24h)",
+    "weekly": "Weekly USD (empty = unlimited, rolling 7d)",
     "rpm": "RPM (empty = unlimited)",
     "submit": "Bind",
     "save": "Save",
     "cancel": "Cancel"
   },
   "usage": {
-    "title": "Usage",
-    "empty": "No bound keys.",
-    "today": "Today",
-    "week": "This week",
-    "calls": "Today's requests",
+    "today": "Last 24 hours",
+    "calls": "Requests in window",
+    "resetPending": "Starts at first bill",
     "statusOk": "OK",
     "statusDaily": "Daily cap",
     "statusWeekly": "Weekly cap",
-    "statusDisabled": "Disabled",
-    "footer": "This page lists bound quota keys only. See Plus statistics for full usage."
+    "showModels": "By model",
+    "hideModels": "Hide models",
+    "model": "Model",
+    "noModels": "No per-model usage in this window yet."
   }
 }

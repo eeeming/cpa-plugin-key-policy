@@ -48,10 +48,11 @@ describe("readPanelAuth", () => {
   });
 
   function setEmbedded(embedded: boolean) {
-    // window.self !== window.top → embedded
     Object.defineProperty(window, "self", { value: window, configurable: true });
     Object.defineProperty(window, "top", {
-      value: embedded ? ({} as Window) : window,
+      value: embedded
+        ? ({ location: { origin: window.location.origin } } as Window)
+        : window,
       configurable: true,
     });
   }
@@ -89,6 +90,18 @@ describe("readPanelAuth", () => {
   it("returns null when the stored value is garbage", () => {
     setEmbedded(true);
     localStorage.setItem(STORAGE_KEY, "not-valid-json-or-obfuscated");
+    expect(readPanelAuth()).toBeNull();
+  });
+
+  it("returns null when the parent frame is cross-origin", () => {
+    Object.defineProperty(window, "self", { value: window, configurable: true });
+    Object.defineProperty(window, "top", {
+      get() {
+        throw new Error("blocked");
+      },
+      configurable: true,
+    });
+    storePanelAuth({ apiBase: "http://127.0.0.1:8317", managementKey: "secret-xyz" });
     expect(readPanelAuth()).toBeNull();
   });
 });

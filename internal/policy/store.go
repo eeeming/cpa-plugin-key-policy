@@ -25,11 +25,13 @@ type Store struct {
 	usage       *usageLedger
 	flusher     *usageFlusher
 
-	listPrices     PriceLister
-	priceMu        sync.Mutex
-	priceCache     []ModelPrice
-	pricesReady    bool
-	priceFetchedAt time.Time
+	listPrices      PriceLister
+	listAPIKeys     APIKeyLister
+	priceMu         sync.Mutex
+	priceCache      []ModelPrice
+	pricesReady     bool
+	priceFetchedAt  time.Time
+	priceRefreshing bool
 }
 
 type AdmitDecision struct {
@@ -71,6 +73,12 @@ func (s *Store) SetPriceLister(fn PriceLister) {
 	s.pricesReady = false
 	s.priceFetchedAt = time.Time{}
 	s.priceMu.Unlock()
+}
+
+func (s *Store) SetAPIKeyLister(fn APIKeyLister) {
+	s.mu.Lock()
+	s.listAPIKeys = fn
+	s.mu.Unlock()
 }
 
 func (s *Store) Configure(cfg Config) error {
@@ -133,17 +141,14 @@ func (s *Store) Configure(cfg Config) error {
 	s.usage.loadFromState(loadedUsage)
 	if cfg.PlusBaseURL != "" {
 		s.listPrices = HTTPPriceLister(nil, cfg.PlusBaseURL, cfg.PlusManagementKey)
+		s.listAPIKeys = HTTPAPIKeyLister(nil, cfg.PlusBaseURL, cfg.PlusManagementKey)
+	} else {
+		s.listAPIKeys = nil
 	}
 
-	var baseKeys []KeyConfig
-	var baseUsage map[string]*UsageState
-	if firstBoot {
-		baseKeys = s.keysSnapshotLocked()
-		baseUsage = s.usageSnapshotLocked()
-	}
 	s.mu.Unlock()
 	if firstBoot {
-		if errSave := s.saveState(statePath, baseKeys, baseUsage); errSave != nil {
+		if errSave := s.persistCurrentState(); errSave != nil {
 			return fmt.Errorf("seed state: %w", errSave)
 		}
 	}
@@ -182,6 +187,7 @@ func (s *Store) Admit(headers http.Header, query map[string][]string, metadata m
 	if key == nil {
 		return AdmitDecision{Reason: "unknown_key"}
 	}
+	s.touchLastAccess(key.ID)
 	if !key.Enabled {
 		return AdmitDecision{Known: true, Allowed: true, KeyID: key.ID, Reason: "policy_disabled"}
 	}
@@ -228,22 +234,31 @@ func (s *Store) refreshPrices(force bool) {
 		return
 	}
 	s.priceMu.Lock()
-	fresh := !force && s.pricesReady && time.Since(s.priceFetchedAt) < priceCacheTTL
-	s.priceMu.Unlock()
-	if fresh {
+	if !force && !s.priceFetchedAt.IsZero() && time.Since(s.priceFetchedAt) < priceCacheTTL {
+		s.priceMu.Unlock()
 		return
 	}
+	if s.priceRefreshing {
+		s.priceMu.Unlock()
+		return
+	}
+	s.priceRefreshing = true
+	s.priceMu.Unlock()
 	list, err := lister()
 	s.priceMu.Lock()
+	s.priceRefreshing = false
+	s.priceFetchedAt = time.Now()
 	defer s.priceMu.Unlock()
 	if err != nil {
-		s.pricesReady = false
-		s.priceCache = nil
+		// Keep the last good table so USD limits do not fail open.
+		// Stamp priceFetchedAt so Admit does not retry Plus on every request.
+		if len(s.priceCache) == 0 {
+			s.pricesReady = false
+		}
 		return
 	}
 	s.priceCache = list
 	s.pricesReady = true
-	s.priceFetchedAt = time.Now()
 }
 
 func (s *Store) cachedPrices() ([]ModelPrice, bool) {
@@ -260,10 +275,14 @@ func (s *Store) cachedPrices() ([]ModelPrice, bool) {
 
 // RecordUsage bills a finalized usage.handle record for a bound, enabled key.
 func (s *Store) RecordUsage(apiKeyOrID, alias, model, provider, serviceTier string, failed bool, detail UsageDetail) float64 {
+	return s.RecordUsageMeta(apiKeyOrID, alias, model, provider, serviceTier, failed, detail, nil)
+}
+
+func (s *Store) RecordUsageMeta(apiKeyOrID, alias, model, provider, serviceTier string, failed bool, detail UsageDetail, metadata map[string]any) float64 {
 	if !s.Enabled() {
 		return 0
 	}
-	key := s.resolveIdentity(apiKeyOrID, nil)
+	key := s.resolveIdentity(apiKeyOrID, metadata)
 	if key == nil || !key.Enabled {
 		return 0
 	}
@@ -499,8 +518,92 @@ func (s *Store) keysSnapshotLocked() []KeyConfig {
 	for _, key := range s.keys {
 		keys = append(keys, *key)
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i].ID < keys[j].ID })
+	sort.Slice(keys, func(i, j int) bool {
+		ai, aj := keys[i].LastAccessAt, keys[j].LastAccessAt
+		if !ai.Equal(aj) {
+			return ai.After(aj)
+		}
+		ci, cj := keys[i].CreatedAt, keys[j].CreatedAt
+		if !ci.Equal(cj) {
+			return ci.After(cj)
+		}
+		return keys[i].ID < keys[j].ID
+	})
 	return keys
+}
+
+func (s *Store) touchLastAccess(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := s.keys[id]
+	if k == nil {
+		return
+	}
+	now := time.Now().UTC()
+	if s.usage != nil && s.usage.now != nil {
+		now = s.usage.now().UTC()
+	}
+	k.LastAccessAt = now
+}
+
+func (s *Store) SyncFromPlus() (SyncResult, error) {
+	s.mu.RLock()
+	lister := s.listAPIKeys
+	s.mu.RUnlock()
+	if lister == nil {
+		return SyncResult{}, fmt.Errorf("plus_base_url is empty")
+	}
+	remote, err := lister()
+	if err != nil {
+		return SyncResult{}, err
+	}
+	out := SyncResult{Total: len(remote)}
+	for _, item := range remote {
+		plain := strings.TrimSpace(item.Plain)
+		if plain == "" {
+			continue
+		}
+		hash, err := HashKey(plain)
+		if err != nil {
+			return out, err
+		}
+		if existing := s.findByHash(hash); existing != nil {
+			out.Skipped++
+			continue
+		}
+		id := "k-" + strings.TrimPrefix(hash, HashPrefix)
+		if len(id) > 14 {
+			id = id[:14]
+		}
+		if s.findByID(id) != nil {
+			id = "k-" + strings.TrimPrefix(hash, HashPrefix)
+			if len(id) > 18 {
+				id = id[:18]
+			}
+		}
+		name := strings.TrimSpace(item.Name)
+		if name == "" || name == plain || strings.Contains(name, plain) {
+			name = PreviewKey(plain)
+		}
+		if err := s.UpsertKey(KeyConfig{
+			ID:          id,
+			Name:        name,
+			Enabled:     true,
+			KeyHash:     hash,
+			KeyPreview:  PreviewKey(plain),
+			CallerScope: CallerScope(plain),
+		}, false); err != nil {
+			return out, err
+		}
+		out.Added++
+		out.AddedIDs = append(out.AddedIDs, id)
+	}
+	if out.Added > 0 {
+		if err := s.persistCurrentState(); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
 }
 
 func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
@@ -521,6 +624,9 @@ func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
 	}
 	if old := s.keys[key.ID]; old != nil && !old.CreatedAt.IsZero() {
 		key.CreatedAt = old.CreatedAt
+		if key.LastAccessAt.IsZero() {
+			key.LastAccessAt = old.LastAccessAt
+		}
 		if key.KeyHash == "" {
 			key.KeyHash = old.KeyHash
 			key.KeyPreview = old.KeyPreview
@@ -532,12 +638,9 @@ func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
 	key.UpdatedAt = now
 	s.keys[key.ID] = &key
 	s.rebuildIndexesLocked()
-	keys := s.keysSnapshotLocked()
-	path := s.statePath
-	usage := s.usageSnapshotLocked()
 	s.mu.Unlock()
 	if persist {
-		return s.saveState(path, keys, usage)
+		return s.persistCurrentState()
 	}
 	return nil
 }
@@ -556,9 +659,6 @@ func (s *Store) DeleteKey(id string) error {
 	}
 	delete(s.keys, id)
 	s.rebuildIndexesLocked()
-	keys := s.keysSnapshotLocked()
-	usage := s.usageSnapshotLocked()
-	path := s.statePath
 	limiter := s.limiter
 	usageLedger := s.usage
 	s.mu.Unlock()
@@ -568,18 +668,7 @@ func (s *Store) DeleteKey(id string) error {
 	if usageLedger != nil {
 		usageLedger.resetUsage(id)
 	}
-	return s.saveState(path, keys, usage)
-}
-
-func (s *Store) ResetRPM(id string) error {
-	if strings.TrimSpace(id) == "" {
-		return errors.New("id is required")
-	}
-	limiter, _ := s.runtimeComponents()
-	if limiter != nil {
-		limiter.Reset(id)
-	}
-	return nil
+	return s.persistCurrentState()
 }
 
 func (s *Store) usageSnapshotLocked() map[string]*UsageState {
@@ -590,26 +679,24 @@ func (s *Store) usageSnapshotLocked() map[string]*UsageState {
 }
 
 func (s *Store) FlushUsage() error {
-	s.mu.Lock()
-	usage := s.usageSnapshotLocked()
+	return s.persistCurrentState()
+}
+
+// persistCurrentState writes keys+usage from memory under persistMu. The
+// snapshot is taken after the persist lock so a flush cannot overwrite a
+// concurrent UpsertKey/DeleteKey with a stale usage (or key) copy.
+func (s *Store) persistCurrentState() error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	s.mu.RLock()
 	path := s.statePath
-	s.mu.Unlock()
+	keys := s.keysSnapshotLocked()
+	usage := s.usageSnapshotLocked()
+	s.mu.RUnlock()
 	if path == "" {
 		return nil
 	}
-	return s.saveUsageOnly(path, usage)
-}
-
-func (s *Store) saveState(path string, keys []KeyConfig, usage map[string]*UsageState) error {
-	s.persistMu.Lock()
-	defer s.persistMu.Unlock()
 	return SaveState(path, keys, usage)
-}
-
-func (s *Store) saveUsageOnly(path string, usage map[string]*UsageState) error {
-	s.persistMu.Lock()
-	defer s.persistMu.Unlock()
-	return SaveUsageOnly(path, usage)
 }
 
 func (s *Store) StartUsageFlusher() func() {

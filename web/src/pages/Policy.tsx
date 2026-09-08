@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { listKeys, bindKey, patchKey, deleteKey, quotaStatus } from "../api/keys";
+import { listKeys, bindKey, patchKey, deleteKey, syncPlusKeys } from "../api/keys";
 import type { KeyPublic } from "../types";
 import { useT } from "../i18n";
+import KeyCard from "../components/KeyCard";
 
 function usdLabel(v: number, unlimited: string): string {
   if (!v) return unlimited;
@@ -12,7 +13,9 @@ export default function Policy() {
   const t = useT();
   const [keys, setKeys] = useState<KeyPublic[]>([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [showBind, setShowBind] = useState(false);
   const [edit, setEdit] = useState<KeyPublic | null>(null);
 
@@ -50,36 +53,52 @@ export default function Policy() {
     }
   };
 
+  const sync = async () => {
+    if (!confirm(t("keys.syncConfirm"))) return;
+    setSyncing(true);
+    setError("");
+    setNotice("");
+    try {
+      const got = await syncPlusKeys();
+      setNotice(t("keys.syncDone", { added: got.added, skipped: got.skipped, total: got.total }));
+      await load();
+    } catch (e) {
+      setError((e as Error).message ?? t("keys.syncFailed"));
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   return (
     <div>
       <div className="fp-head" style={{ margin: "0 0 16px" }}>
-        <h1>{t("header.policy")}</h1>
         <div className="fp-actions">
-          <button className="btn sm" onClick={() => void load()}>{t("keys.refresh")}</button>
           <button className="btn primary sm" onClick={() => setShowBind(true)}>{t("keys.bind")}</button>
+          <button className="btn sm" disabled={syncing} onClick={() => void sync()}>
+            {syncing ? t("keys.syncing") : t("keys.sync")}
+          </button>
         </div>
+        <button className="btn sm" onClick={() => void load()}>{t("keys.refresh")}</button>
       </div>
-      <p className="muted" style={{ marginBottom: 16 }}>{t("keys.notice")}</p>
       {error && <div className="card" style={{ color: "var(--danger)" }}>{error}</div>}
+      {notice && <div className="card" style={{ color: "var(--ok)" }}>{notice}</div>}
       {loading && <div className="muted">{t("keys.loading")}</div>}
       {!loading && keys.length === 0 && <div className="card muted">{t("keys.empty")}</div>}
-      {keys.map((k) => {
-        const st = quotaStatus(k);
-        return (
-          <div key={k.id} className={"keycard" + (k.enabled ? "" : " disabled")}>
-            <div className="keycard-title">{k.name} <span className="muted">{k.key_preview}</span></div>
-            <div className="muted">
-              {t("keys.colDaily")}: {usdLabel(k.daily_limit_usd, t("keys.unlimited"))} · {t("keys.colWeekly")}: {usdLabel(k.weekly_limit_usd, t("keys.unlimited"))} · RPM: {k.rpm || t("keys.unlimited")}
-            </div>
-            <div className="muted">{t("keys.colStatus")}: {st === "disabled" ? t("keys.disabled") : st === "daily" ? t("usage.statusDaily") : st === "weekly" ? t("usage.statusWeekly") : t("usage.statusOk")}</div>
-            <div className="fp-actions" style={{ marginTop: 8 }}>
-              <button className="btn sm" onClick={() => setEdit(k)}>{t("keys.edit")}</button>
-              <button className="btn sm" onClick={() => void toggle(k)}>{k.enabled ? t("keys.disable") : t("keys.enable")}</button>
-              <button className="btn sm" onClick={() => void unbind(k)}>{t("keys.unbind")}</button>
-            </div>
-          </div>
-        );
-      })}
+      <div className="card-stack">
+        {keys.map((k) => (
+          <KeyCard
+            key={k.id}
+            k={k}
+            actions={(
+              <>
+                <button className="btn sm" onClick={() => setEdit(k)}>{t("keys.edit")}</button>
+                <button className="btn sm" onClick={() => void toggle(k)}>{k.enabled ? t("keys.disable") : t("keys.enable")}</button>
+                <button className="btn sm danger-outline" onClick={() => void unbind(k)}>{t("keys.unbind")}</button>
+              </>
+            )}
+          />
+        ))}
+      </div>
       {showBind && (
         <BindModal
           title={t("bind.title")}
@@ -142,7 +161,7 @@ function BindModal({
       await onSubmit({
         id,
         name: name.trim() || id,
-        key: existing ? undefined : key.trim(),
+        key: existing ? (key.trim() || undefined) : key.trim(),
         daily_limit_usd: daily.trim() === "" ? 0 : Number(daily),
         weekly_limit_usd: weekly.trim() === "" ? 0 : Number(weekly),
         rpm: rpm.trim() === "" ? 0 : Number(rpm),
@@ -158,6 +177,11 @@ function BindModal({
     <div className="modal-overlay" onClick={onClose}>
       <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => void submit(e)}>
         <h2>{title}</h2>
+        {existing && (
+          <div className="muted" style={{ marginBottom: 12 }}>
+            {t("keys.colDaily")}: {usdLabel(existing.daily_limit_usd, t("keys.unlimited"))}
+          </div>
+        )}
         <div className="form-row">
           <label>{t("bind.name")}</label>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />

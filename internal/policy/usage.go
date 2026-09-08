@@ -12,12 +12,15 @@ const (
 	usageFlushInterval = 15 * time.Second
 )
 
-// usageLedger tracks per-key dollar usage with a daily window (UTC midnight
-// reset) and a rolling 7-day weekly window. Usage is also broken down per alias.
+// usageLedger tracks per-key dollar usage with rolling windows: 24 hours
+// (daily) and 7×24 hours (weekly), each starting at the first billed request
+// in that window. When the window ages out the accumulated total is dropped
+// and the next write opens a new window at now (conservative — no sliding
+// partial sums). Usage is also broken down per alias.
 //
 // It is the in-memory source of truth; a background flusher periodically
-// persists it to the state JSON (see Store.persistUsage). Reads for limit
-// enforcement (Authenticate) and reporting (keys list) go through here.
+// persists it via Store.persistCurrentState. Reads for limit enforcement
+// (Admit) and reporting (keys list) go through here.
 type usageLedger struct {
 	mu  sync.Mutex
 	now func() time.Time
@@ -32,31 +35,45 @@ func newUsageLedger(now func() time.Time) *usageLedger {
 	return &usageLedger{now: now, entries: make(map[string]*UsageState)}
 }
 
+// cloneUsageState copies Daily/Weekly by value and clones ByAlias so a snapshot
+// can be marshaled or mutated without racing the live ledger map.
+func cloneUsageState(st *UsageState) *UsageState {
+	if st == nil {
+		return nil
+	}
+	cp := *st
+	if st.ByAlias == nil {
+		return &cp
+	}
+	cp.ByAlias = make(map[string]AliasUsageWindows, len(st.ByAlias))
+	for alias, windows := range st.ByAlias {
+		cp.ByAlias[alias] = windows
+	}
+	return &cp
+}
+
 // loadFromState seeds the ledger from a loaded state file (restart recovery).
 func (l *usageLedger) loadFromState(usage map[string]*UsageState) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.entries = make(map[string]*UsageState, len(usage))
 	for id, st := range usage {
-		if st == nil {
-			continue
+		if cloned := cloneUsageState(st); cloned != nil {
+			l.entries[id] = cloned
 		}
-		cp := *st
-		l.entries[id] = &cp
 	}
 }
 
-// snapshot returns a deep copy for persistence/reporting.
+// snapshot returns a deep copy for persistence/reporting. The copy is
+// independent of the live ledger: RecordCost may run while the caller marshals.
 func (l *usageLedger) snapshot() map[string]*UsageState {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	out := make(map[string]*UsageState, len(l.entries))
 	for id, st := range l.entries {
-		if st == nil {
-			continue
+		if cloned := cloneUsageState(st); cloned != nil {
+			out[id] = cloned
 		}
-		cp := *st
-		out[id] = &cp
 	}
 	return out
 }
@@ -73,43 +90,37 @@ func (l *usageLedger) entryLocked(id string) *UsageState {
 	return st
 }
 
-// ensureDailyWindow resets the daily window if we crossed UTC midnight since it
-// last started. Caller must hold the mutex.
-func (l *usageLedger) ensureDailyWindowLocked(st *UsageState, now time.Time) {
-	startOfDay := now.UTC().Truncate(dayWindow)
-	if st.Daily.WindowStart.IsZero() || !sameDay(st.Daily.WindowStart, startOfDay) {
-		st.Daily = UsageWindow{WindowStart: startOfDay}
-	}
-}
-
-func (l *usageLedger) ensureWeeklyWindowLocked(st *UsageState, now time.Time) {
-	// Rolling window: if the recorded start is older than 7 days, slide it
-	// forward so only the trailing 7 days count. We drop the accumulated total
-	// and reset the window to now (conservative — losing usage that aged out
-	// rather than recomputing partial slices; acceptable for an over-quota guard).
-	if st.Weekly.WindowStart.IsZero() || now.Sub(st.Weekly.WindowStart) >= weekWindow {
-		st.Weekly = UsageWindow{WindowStart: now.UTC()}
-	}
-}
-
-// ensureAliasWindow applies the same window logic to a per-alias daily/weekly slice.
-func (l *usageLedger) ensureAliasWindowLocked(w *UsageWindow, daily bool, now time.Time) {
-	if daily {
-		startOfDay := now.UTC().Truncate(dayWindow)
-		if w.WindowStart.IsZero() || !sameDay(w.WindowStart, startOfDay) {
-			*w = UsageWindow{WindowStart: startOfDay}
-		}
+// rollWindowLocked clears a window that has aged out. It does not open a new
+// window; the next RecordCost does that so idle expired keys show no reset time.
+func (l *usageLedger) rollWindowLocked(w *UsageWindow, length time.Duration, now time.Time) {
+	if w.WindowStart.IsZero() {
 		return
 	}
-	if w.WindowStart.IsZero() || now.Sub(w.WindowStart) >= weekWindow {
+	if now.Sub(w.WindowStart) >= length {
+		*w = UsageWindow{}
+	}
+}
+
+func (l *usageLedger) openWindowLocked(w *UsageWindow, now time.Time) {
+	if w.WindowStart.IsZero() {
 		*w = UsageWindow{WindowStart: now.UTC()}
 	}
 }
 
-func sameDay(a, b time.Time) bool {
-	a = a.UTC()
-	b = b.UTC()
-	return a.Year() == b.Year() && a.Month() == b.Month() && a.Day() == b.Day()
+func (l *usageLedger) ensureDailyWindowLocked(st *UsageState, now time.Time) {
+	l.rollWindowLocked(&st.Daily, dayWindow, now)
+}
+
+func (l *usageLedger) ensureWeeklyWindowLocked(st *UsageState, now time.Time) {
+	l.rollWindowLocked(&st.Weekly, weekWindow, now)
+}
+
+func (l *usageLedger) ensureAliasWindowLocked(w *UsageWindow, daily bool, now time.Time) {
+	length := weekWindow
+	if daily {
+		length = dayWindow
+	}
+	l.rollWindowLocked(w, length, now)
 }
 
 // RecordCost adds a dollar amount for a key+alias to the daily, weekly, and
@@ -137,6 +148,8 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 	st := l.entryLocked(id)
 	l.ensureDailyWindowLocked(st, now)
 	l.ensureWeeklyWindowLocked(st, now)
+	l.openWindowLocked(&st.Daily, now)
+	l.openWindowLocked(&st.Weekly, now)
 	st.Daily.TotalUSD += amount
 	st.Weekly.TotalUSD += amount
 	st.Daily.CallCount += callCount
@@ -161,6 +174,8 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 	aliasEntry := st.ByAlias[alias]
 	l.ensureAliasWindowLocked(&aliasEntry.Daily, true, now)
 	l.ensureAliasWindowLocked(&aliasEntry.Weekly, false, now)
+	l.openWindowLocked(&aliasEntry.Daily, now)
+	l.openWindowLocked(&aliasEntry.Weekly, now)
 	aliasEntry.Daily.TotalUSD += amount
 	aliasEntry.Weekly.TotalUSD += amount
 	aliasEntry.Daily.CallCount += callCount
@@ -181,18 +196,20 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 // the rolling-week's cache spend / hit-rate. CacheHitRate is not serialized
 // here; the UI derives it as cacheRead / (cacheRead + input).
 type UsageSummary struct {
-	DailyUSD              float64   `json:"daily_usd"`
-	WeeklyUSD             float64   `json:"weekly_usd"`
-	DailyLimitUSD         float64   `json:"daily_limit_usd"`
-	WeeklyLimitUSD        float64   `json:"weekly_limit_usd"`
-	DailyResetAt          time.Time `json:"daily_reset_at,omitempty"`
-	WeeklyResetAt         time.Time `json:"weekly_reset_at,omitempty"`
-	DailyCacheCostUSD     float64   `json:"daily_cache_cost_usd,omitempty"`
-	WeeklyCacheCostUSD    float64   `json:"weekly_cache_cost_usd,omitempty"`
-	DailyCacheReadTokens  int64     `json:"daily_cache_read_tokens,omitempty"`
-	WeeklyCacheReadTokens int64     `json:"weekly_cache_read_tokens,omitempty"`
-	DailyInputTokens      int64     `json:"daily_input_tokens,omitempty"`
-	WeeklyInputTokens     int64     `json:"weekly_input_tokens,omitempty"`
+	DailyUSD              float64    `json:"daily_usd"`
+	WeeklyUSD             float64    `json:"weekly_usd"`
+	DailyLimitUSD         float64    `json:"daily_limit_usd"`
+	WeeklyLimitUSD        float64    `json:"weekly_limit_usd"`
+	DailyWindowStart      *time.Time `json:"daily_window_start,omitempty"`
+	WeeklyWindowStart     *time.Time `json:"weekly_window_start,omitempty"`
+	DailyResetAt          *time.Time `json:"daily_reset_at,omitempty"`
+	WeeklyResetAt         *time.Time `json:"weekly_reset_at,omitempty"`
+	DailyCacheCostUSD     float64    `json:"daily_cache_cost_usd,omitempty"`
+	WeeklyCacheCostUSD    float64    `json:"weekly_cache_cost_usd,omitempty"`
+	DailyCacheReadTokens  int64      `json:"daily_cache_read_tokens,omitempty"`
+	WeeklyCacheReadTokens int64      `json:"weekly_cache_read_tokens,omitempty"`
+	DailyInputTokens      int64      `json:"daily_input_tokens,omitempty"`
+	WeeklyInputTokens     int64      `json:"weekly_input_tokens,omitempty"`
 	// DailyCallCount / WeeklyCallCount: number of successful requests billed
 	// into the window (token-billed or per-call). Failed requests don't count.
 	// Reported for display only; not used for limit enforcement.
@@ -201,8 +218,9 @@ type UsageSummary struct {
 }
 
 // Summary returns the current usage + limits for a key. Limits come from the
-// KeyConfig; usage from the ledger. daily_reset_at = next UTC midnight;
-// weekly_reset_at = window start + 7 days.
+// KeyConfig; usage from the ledger. daily_reset_at = window start + 24h;
+// weekly_reset_at = window start + 7 days. Both are omitted until the key
+// has billed at least once (the window starts on first use).
 func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
 	now := l.now()
 	l.mu.Lock()
@@ -211,7 +229,6 @@ func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
 	summary := UsageSummary{
 		DailyLimitUSD:  key.DailyLimitUSD,
 		WeeklyLimitUSD: key.WeeklyLimitUSD,
-		DailyResetAt:   now.UTC().Truncate(dayWindow).Add(dayWindow),
 	}
 	if st == nil {
 		return summary
@@ -234,10 +251,18 @@ func (l *usageLedger) Summary(key KeyConfig) UsageSummary {
 	summary.WeeklyInputTokens = ensureSt.Weekly.InputTokens
 	summary.DailyCallCount = ensureSt.Daily.CallCount
 	summary.WeeklyCallCount = ensureSt.Weekly.CallCount
-	if !ensureSt.Weekly.WindowStart.IsZero() {
-		summary.WeeklyResetAt = ensureSt.Weekly.WindowStart.Add(weekWindow)
-	}
+	summary.DailyWindowStart, summary.DailyResetAt = windowBounds(ensureSt.Daily, dayWindow)
+	summary.WeeklyWindowStart, summary.WeeklyResetAt = windowBounds(ensureSt.Weekly, weekWindow)
 	return summary
+}
+
+func windowBounds(w UsageWindow, length time.Duration) (start, reset *time.Time) {
+	if w.WindowStart.IsZero() {
+		return nil, nil
+	}
+	s := w.WindowStart.UTC()
+	r := s.Add(length)
+	return &s, &r
 }
 
 // OverLimit reports whether a key is over its daily or weekly dollar limit.
@@ -257,35 +282,25 @@ func (l *usageLedger) OverLimit(key KeyConfig) (string, UsageSummary) {
 	return "", UsageSummary{}
 }
 
-// resetUsage clears usage for a key (manual unlock) in memory only.
+// resetUsage drops in-memory usage for a key (unbind).
 func (l *usageLedger) resetUsage(id string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	delete(l.entries, id)
 }
 
-// AliasUsageEntry is one row of the per-alias usage breakdown reported by the
-// key detail API. Configured aliases appear with InConfig=true (zero values
-// when unused); aliases with historical usage that are no longer in the key's
-// config appear with InConfig=false. Daily/Weekly are the current (re-evaluated)
-// windows for that alias.
+// AliasUsageEntry is one billed model (CPA usage.handle Alias) in the
+// per-key usage breakdown.
 type AliasUsageEntry struct {
-	Alias       string      `json:"alias"`
-	Provider    string      `json:"provider,omitempty"`
-	TargetModel string      `json:"target_model,omitempty"`
-	BillingMode string      `json:"billing_mode,omitempty"`
-	PerCallUSD  float64     `json:"per_call_usd,omitempty"`
-	InConfig    bool        `json:"in_config"`
-	Daily       UsageWindow `json:"daily"`
-	Weekly      UsageWindow `json:"weekly"`
+	Alias  string      `json:"alias"`
+	Daily  UsageWindow `json:"daily"`
+	Weekly UsageWindow `json:"weekly"`
 }
 
-// AliasUsage returns a per-alias usage breakdown for a key: configured aliases
-// (zero values when unused) merged with ledger residuals (aliases that have
-// historical usage but are no longer in the key's config, InConfig=false).
-// Windows are re-evaluated on read so an aged-out weekly total resets for
-// display (the read does not mutate the ledger; the next write commits the
-// reset, mirroring Summary). Rows are sorted by alias for stable display.
+// AliasUsage returns billed-model rows for a key. Windows are re-evaluated
+// on read so an aged-out total resets for display (the read does not mutate
+// the ledger; the next write commits the reset, mirroring Summary). Rows
+// are sorted by alias for stable display.
 func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
 	now := l.now()
 	l.mu.Lock()
@@ -297,10 +312,9 @@ func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
 			l.ensureAliasWindowLocked(&w.Daily, true, now)
 			l.ensureAliasWindowLocked(&w.Weekly, false, now)
 			byAlias[alias] = AliasUsageEntry{
-				Alias:    alias,
-				InConfig: true,
-				Daily:    w.Daily,
-				Weekly:   w.Weekly,
+				Alias:  alias,
+				Daily:  w.Daily,
+				Weekly: w.Weekly,
 			}
 		}
 	}

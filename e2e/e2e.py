@@ -193,10 +193,10 @@ def main() -> int:
         fail(f"over daily cap expected 429, got {status} {payload}")
     else:
         code = error_code(payload)
-        if code != "daily_exceeded":
-            fail(f"429 code={code!r}, want daily_exceeded payload={payload}")
+        if code != "insufficient_quota":
+            fail(f"429 code={code!r}, want insufficient_quota payload={payload}")
         else:
-            ok("over-limit returns 429 daily_exceeded")
+            ok("over-limit returns 429 insufficient_quota")
 
     # 3) Unbound still works after a bound key is blocked.
     status, payload, _ = chat(UNBOUND)
@@ -227,10 +227,10 @@ def main() -> int:
         fail(f"rpm second request expected 429, got {status} {payload}")
     else:
         code = error_code(payload)
-        if code != "rpm_exceeded":
-            fail(f"rpm 429 code={code!r}, want rpm_exceeded payload={payload}")
+        if code != "rate_limit_exceeded":
+            fail(f"rpm 429 code={code!r}, want rate_limit_exceeded payload={payload}")
         else:
-            ok("rpm_exceeded 429")
+            ok("rate_limit_exceeded 429")
 
     print("---- summary ----", flush=True)
     if failures:

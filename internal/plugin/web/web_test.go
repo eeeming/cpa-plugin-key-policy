@@ -13,6 +13,12 @@ func TestServeIndex(t *testing.T) {
 	if got := headers.Get("Content-Type"); got != "text/html; charset=utf-8" {
 		t.Fatalf("content-type = %q, want text/html", got)
 	}
+	if got := headers.Get("Content-Security-Policy"); got != "frame-ancestors 'self'" {
+		t.Fatalf("csp = %q", got)
+	}
+	if got := headers.Get("X-Frame-Options"); got != "SAMEORIGIN" {
+		t.Fatalf("x-frame-options = %q", got)
+	}
 	if len(body) == 0 {
 		t.Fatal("body is empty")
 	}

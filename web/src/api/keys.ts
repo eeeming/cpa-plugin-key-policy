@@ -24,6 +24,19 @@ export async function deleteKey(id: string): Promise<void> {
   await c.delete(pluginPath("/keys"), { params: { id } });
 }
 
+export interface SyncPlusResult {
+  added: number;
+  skipped: number;
+  total: number;
+  added_ids?: string[];
+}
+
+export async function syncPlusKeys(): Promise<SyncPlusResult> {
+  const c = apiClient();
+  const { data } = await c.post<SyncPlusResult>(pluginPath("/keys/sync"));
+  return data;
+}
+
 export async function fetchKeyUsage(id: string): Promise<KeyUsageResponse> {
   const c = apiClient();
   const { data } = await c.get<KeyUsageResponse>(pluginPath("/keys/usage"), {

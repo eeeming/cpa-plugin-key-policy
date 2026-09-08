@@ -34,9 +34,9 @@ web/vitest.config.js
 
 node_modules/
 
-# Local-only patch for pi-mcp-adapter SDK (Stitch MCP ajv fix). Not part
-# of this plugin; kept for the maintainer's local pi setup.
-scripts/patch-pi-mcp-sdk.mjs
 stitch_*.png
-nul
+
+# Live gomami tunnel config (UUID + public hostname). Never commit.
+e2e/plus/gomami-cloudflared-config.yml
+e2e/plus/cloudflared/
 .npm-cache/

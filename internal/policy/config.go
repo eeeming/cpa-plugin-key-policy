@@ -14,25 +14,26 @@ import (
 )
 
 type Config struct {
-	Enabled            bool        `yaml:"enabled" json:"enabled"`
-	StateFile          string      `yaml:"state_file" json:"state_file"`
-	PlusBaseURL        string      `yaml:"plus_base_url" json:"plus_base_url"`
-	PlusManagementKey  string      `yaml:"plus_management_key" json:"plus_management_key"`
-	Keys               []KeyConfig `yaml:"keys" json:"keys"`
+	Enabled           bool        `yaml:"enabled" json:"enabled"`
+	StateFile         string      `yaml:"state_file" json:"state_file"`
+	PlusBaseURL       string      `yaml:"plus_base_url" json:"plus_base_url"`
+	PlusManagementKey string      `yaml:"plus_management_key" json:"plus_management_key"`
+	Keys              []KeyConfig `yaml:"keys" json:"keys"`
 }
 
 type KeyConfig struct {
-	ID           string    `yaml:"id" json:"id"`
-	Name         string    `yaml:"name" json:"name"`
-	Enabled      bool      `yaml:"enabled" json:"enabled"`
-	KeyHash      string    `yaml:"key_hash" json:"key_hash"`
-	KeyPreview   string    `yaml:"key_preview" json:"key_preview"`
-	CallerScope  string    `yaml:"caller_scope,omitempty" json:"caller_scope,omitempty"`
-	RPM          int       `yaml:"rpm" json:"rpm"`
-	DailyLimitUSD  float64 `yaml:"daily_limit_usd,omitempty" json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD float64 `yaml:"weekly_limit_usd,omitempty" json:"weekly_limit_usd,omitempty"`
-	CreatedAt    time.Time `yaml:"created_at,omitempty" json:"created_at,omitempty"`
-	UpdatedAt    time.Time `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
+	ID             string    `yaml:"id" json:"id"`
+	Name           string    `yaml:"name" json:"name"`
+	Enabled        bool      `yaml:"enabled" json:"enabled"`
+	KeyHash        string    `yaml:"key_hash" json:"key_hash"`
+	KeyPreview     string    `yaml:"key_preview" json:"key_preview"`
+	CallerScope    string    `yaml:"caller_scope,omitempty" json:"caller_scope,omitempty"`
+	RPM            int       `yaml:"rpm" json:"rpm"`
+	DailyLimitUSD  float64   `yaml:"daily_limit_usd,omitempty" json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD float64   `yaml:"weekly_limit_usd,omitempty" json:"weekly_limit_usd,omitempty"`
+	CreatedAt      time.Time `yaml:"created_at,omitempty" json:"created_at,omitempty"`
+	UpdatedAt      time.Time `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
+	LastAccessAt   time.Time `yaml:"last_access_at,omitempty" json:"last_access_at,omitempty"`
 }
 
 type UsageState struct {
@@ -197,29 +198,14 @@ func LoadState(path string) (*State, error) {
 	if state.Usage == nil {
 		state.Usage = make(map[string]*UsageState)
 	}
+	for i := range state.Keys {
+		state.Keys[i].KeyPreview = SanitizeStoredPreview(state.Keys[i].KeyPreview)
+	}
 	return &state, nil
 }
 
 func SaveState(path string, keys []KeyConfig, usage map[string]*UsageState) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC()}
-	raw, err := json.MarshalIndent(state, "", "  ")
-	if err != nil {
-		return err
-	}
-	return atomicWriteStateFile(path, raw)
-}
-
-func SaveUsageOnly(path string, usage map[string]*UsageState) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	var keys []KeyConfig
-	if cur, err := LoadState(path); err == nil {
-		keys = cur.Keys
-	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	state := State{Version: 1, Keys: keys, Usage: usage, UpdatedAt: time.Now().UTC()}

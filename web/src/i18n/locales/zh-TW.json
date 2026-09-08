@@ -1,8 +1,6 @@
 {
   "header": {
     "title": "cpa-key-quota",
-    "policy": "策略",
-    "usage": "用量",
     "logout": "退出"
   },
   "login": {
@@ -26,7 +24,12 @@
     "loading": "加载中…",
     "loadFailed": "加载失败",
     "empty": "还没有绑定任何 Key。表外 Key 不限额。",
-    "bind": "绑定",
+    "bind": "新增",
+    "sync": "同步",
+    "syncing": "同步中…",
+    "syncConfirm": "匯入 Plus 中尚未綁定的 Key。Plus 列表沒有名稱，新 Key 會先用 preview 當名字（可再編輯）。既有策略不會改。新 Key 預設不限額。",
+    "syncDone": "同步完成：新增 {{added}}，已有 {{skipped}}，Plus 共 {{total}} 把。",
+    "syncFailed": "同步失敗",
     "edit": "编辑",
     "disable": "停用",
     "enable": "启用",
@@ -34,15 +37,8 @@
     "unbindConfirm": "确认解绑 {{id}}？Plus api-keys 不会被删除。",
     "enabled": "启用",
     "disabled": "停用",
-    "colName": "名称",
-    "colPreview": "Key preview",
-    "colDaily": "日限额",
-    "colWeekly": "周限额",
-    "colRpm": "RPM",
-    "colStatus": "状态",
-    "colActions": "操作",
-    "unlimited": "不限",
-    "notice": "这把 Key 必须已在 Plus api-keys 里；插件只负责限额。表外 Key 不动。改价去 Plus 价目表。"
+    "colDaily": "日限額（24h）",
+    "unlimited": "不限"
   },
   "bind": {
     "title": "绑定已有 Key",
@@ -51,23 +47,23 @@
     "keyHint": "只用来计算哈希。磁盘和列表里只保留 sha256 与 preview，不会保存明文。",
     "keyRotate": "更换 Key 明文（可选）",
     "keyRotateHint": "留空则继续用当前绑定。填写新明文会重新哈希，明文不会落盘，列表只显示 preview。",
-    "daily": "日限额 USD（空=不限）",
-    "weekly": "周限额 USD（空=不限）",
+    "daily": "日限額 USD（空=不限，滾動 24 小時）",
+    "weekly": "周限額 USD（空=不限，滾動 7 天）",
     "rpm": "RPM（空=不限）",
     "submit": "绑定",
     "save": "保存",
     "cancel": "取消"
   },
   "usage": {
-    "title": "用量",
-    "empty": "没有已绑定的 Key。",
-    "today": "今日费用",
-    "week": "本周费用",
-    "calls": "今日请求",
+    "today": "近 24 小時",
+    "calls": "本窗口請求",
+    "resetPending": "首次計費後起算",
     "statusOk": "正常",
     "statusDaily": "日限",
     "statusWeekly": "周限",
-    "statusDisabled": "停用",
-    "footer": "本页只显示已绑定限额的 Key。全部用量请看 Plus 统计。"
+    "showModels": "按模型",
+    "hideModels": "收起模型",
+    "model": "模型",
+    "noModels": "這個窗口還沒有按模型的用量。"
   }
 }

@@ -1,36 +1,23 @@
-/* "Quiet Paper" light theme — aligned with the CPA management panel.
- * Tokens mirror _panel_ref/src/styles/themes.scss (light) + variables.scss.
- * Component rules mirror _panel_ref/src/styles/components.scss and the
- * Table / ToggleSwitch / SelectionCheckbox modules. Class names are kept
- * so no component code changes are needed. */
+/* Quiet Paper theme tokens aligned with the CPA management panel. */
 :root {
-  /* surfaces (panel light theme) */
-  --bg: #faf9f5;            /* page background (paper) */
-  --panel: #ffffff;          /* card / raised surface */
-  --panel-2: #f0eee8;        /* secondary container bg (panel --bg-primary) */
-  --muted-bg: #e9e6df;       /* tertiary / hover (panel --bg-tertiary) */
-  /* borders */
+  --bg: #faf9f5;
+  --panel: #ffffff;
+  --panel-2: #f0eee8;
+  --muted-bg: #e9e6df;
   --border: #e3e1db;
   --border-strong: #d5d2cb;
   --border-hover: #cecac4;
-  /* text */
   --text: #2d2a26;
   --muted: #6d6760;
-  /* primary (greige — NOT blue) */
   --accent: #8b8680;
   --accent-2: #7f7a74;
   --accent-3: #726d67;
   --accent-soft: rgba(139, 134, 128, 0.12);
   --accent-ring: rgba(139, 134, 128, 0.18);
-  /* on-accent: text rendered on top of the accent fill (primary/danger btns,
-   * toggle thumb). Kept as a token so dark theme can flip it. */
   --on-accent: #ffffff;
-  /* row hover tint + modal scrim + placeholder, derived from the surface text
-   * so dark theme stays legible instead of glowing white. */
   --row-hover: rgba(139, 134, 128, 0.06);
   --scrim: rgba(45, 42, 38, 0.35);
   --placeholder: rgba(109, 103, 96, 0.55);
-  /* status */
   --danger: #c65746;
   --danger-soft: rgba(198, 87, 70, 0.08);
   --danger-border: rgba(198, 87, 70, 0.35);
@@ -38,23 +25,20 @@
   --ok-soft: rgba(16, 185, 129, 0.08);
   --ok-border: rgba(16, 185, 129, 0.35);
   --warn: #e0aa14;
-  /* radii (panel variables.scss) */
+  --quota-pill-bg: #e8f0fe;
+  --quota-pill-fg: #3b6fd8;
+  --quota-bar: #22c55e;
   --r-sm: 4px;
   --r-md: 8px;
   --r-lg: 12px;
   --r-full: 9999px;
-  /* shadow (panel variables.scss) */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
-  font-family: "Source Sans 3", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light;
   --t-fast: 150ms ease;
 }
 
-/* Pure white theme — mirrors the CPA panel's [data-theme='white'].
- * Replaces the warm paper background with clean white surfaces, keeping the
- * greige accent for brand continuity. Token values verified against the
- * Stitch "white variant" preview. */
 :root[data-theme="white"] {
   --bg: #f5f5f5;
   --panel: #ffffff;
@@ -81,13 +65,12 @@
   --ok-soft: rgba(16, 185, 129, 0.08);
   --ok-border: rgba(16, 185, 129, 0.35);
   --warn: #e0aa14;
+  --quota-pill-bg: #e8f0fe;
+  --quota-pill-fg: #3b6fd8;
+  --quota-bar: #22c55e;
   color-scheme: light;
 }
 
-/* Dark theme — mirrors the CPA panel's [data-theme='dark'].
- * Deep charcoal-coffee surfaces; the greige accent is lifted to #a3a09a and
- * paired with dark on-accent text so primary buttons stay legible. Token values
- * verified against the Stitch "dark variant" preview. */
 :root[data-theme="dark"] {
   --bg: #1e1d1b;
   --panel: #26241f;
@@ -114,6 +97,9 @@
   --ok-soft: rgba(52, 211, 153, 0.12);
   --ok-border: rgba(52, 211, 153, 0.38);
   --warn: #f0c050;
+  --quota-pill-bg: rgba(59, 111, 216, 0.2);
+  --quota-pill-fg: #8fb0f0;
+  --quota-bar: #34d399;
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.4);
   color-scheme: dark;
@@ -134,12 +120,8 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { color: var(--accent-2); text-decoration: underline; }
 
-/* Desktop shell: top horizontal nav + centered 1200px content.
- * Mobile keeps the old .header (stacked) via the max-width block. */
-.app { max-width: 1200px; margin: 0 auto; padding: 24px 24px 80px; }
+.app { max-width: 1200px; margin: 0 auto; padding: 24px 24px 48px; }
 
-/* Top horizontal nav (desktop). Mirrors the Stitch 'Quiet Paper' design:
- * paper bg, bottom border, left = title + base url, right = nav + actions. */
 .topnav {
   position: sticky; top: 0; z-index: 50;
   background: var(--bg);
@@ -149,30 +131,14 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 }
 .topnav-inner {
   max-width: 1200px; margin: 0 auto;
-  height: 56px; display: flex; align-items: center; justify-content: space-between;
+  min-height: 56px; display: flex; align-items: center; justify-content: space-between;
   gap: 16px;
 }
 .topnav-brand { display: flex; flex-direction: column; line-height: 1.2; min-width: 0; }
 .topnav-brand .tn-title { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
 .topnav-brand .tn-sub { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .topnav-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.topnav-actions .tn-link {
-  font-size: 14px; font-weight: 600; color: var(--muted); text-decoration: none; padding: 6px 4px;
-  border-bottom: 2px solid transparent; transition: color var(--t-fast), border-color var(--t-fast);
-}
-.topnav-actions .tn-link:hover { color: var(--accent-2); text-decoration: none; }
-.topnav-actions .tn-link.active { color: var(--accent); border-bottom-color: var(--accent); }
-.topnav-actions .tn-link.danger:hover { color: var(--danger); }
 
-/* Legacy .header kept for mobile (max-width:640px) stacked layout. */
-.header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 0; margin-bottom: 24px; border-bottom: 1px solid var(--border);
-}
-.header h1 { font-size: 20px; margin: 0; font-weight: 700; letter-spacing: -0.01em; }
-.header .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
-
-/* Buttons — panel components.scss .btn */
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   border: 1px solid transparent;
@@ -189,10 +155,7 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
 .btn.primary { background-color: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .btn.primary:hover { background-color: var(--accent-2); border-color: var(--accent-2); }
 .btn.danger { background-color: var(--danger); color: var(--on-accent); border-color: var(--danger); }
-.btn.danger:hover { background-color: var(--accent-3); filter: brightness(0.95); }
-.btn.sm { padding: 8px 10px; font-size: 13px; }
-/* danger-outline: transparent bg, red text + border (for destructive actions
- * that shouldn't compete with the primary save button, e.g. 删除 Key). */
+.btn.sm { padding: 8px 14px; font-size: 13px; }
 .btn.danger-outline {
   background: transparent; color: var(--danger); border-color: var(--danger-border);
 }
@@ -200,7 +163,6 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
   background: var(--danger-soft); border-color: var(--danger); color: var(--danger);
 }
 
-/* Card — panel .card (radius-lg, panel bg, hairline border, shadow-sm) */
 .card {
   background-color: var(--panel);
   border: 1px solid var(--border);
@@ -209,10 +171,9 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
   padding: 24px;
 }
 
-/* Form — panel .form-group / .input */
 .form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
 .form-row label { font-weight: 600; color: var(--text); font-size: 13px; }
-.input, select {
+.input {
   width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--r-md);
@@ -223,17 +184,13 @@ a:hover { color: var(--accent-2); text-decoration: underline; }
   transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
 .input::placeholder { color: var(--placeholder); }
-.input:focus, select:focus {
+.input:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
 }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 
-/* Table — panel Table.module.scss (wrap + border-radius + overflow hidden) */
-.card.table-wrap {
-  padding: 0; border-radius: var(--r-md); overflow: hidden;
-}
 table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; color: var(--text); }
 thead { background: var(--muted-bg); }
 th {
@@ -245,9 +202,9 @@ td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align:
 tbody tr:last-child td { border-bottom: none; }
 tbody tr { transition: background-color var(--t-fast); }
 tbody tr:hover td { background: var(--row-hover); }
-td .mono, .mono { font-family: "Courier Prime", ui-monospace, Consolas, "Courier New", monospace; font-size: 12px; }
+.mono, td .mono { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 12px; }
+th.num, td.num { text-align: right; }
 
-/* Status badge — panel .status-badge (translucent bg + colored border, pill) */
 .tag {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 4px 10px; border-radius: var(--r-full);
@@ -263,32 +220,7 @@ td .mono, .mono { font-family: "Courier Prime", ui-monospace, Consolas, "Courier
   background: var(--danger-soft); border: 1px solid var(--danger-border);
   border-radius: var(--r-md); padding: 8px 12px;
 }
-.success { color: var(--ok); margin: 8px 0; }
 
-.actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.spacer { flex: 1; }
-
-/* Model picker — chips with panel SelectionCheckbox treatment */
-.picker-group { margin-bottom: 16px; }
-.picker-group .pg-head {
-  color: var(--muted); font-size: 11px; margin: 14px 0 8px;
-  font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
-}
-.picker-group .pg-models { display: flex; flex-wrap: wrap; gap: 8px; }
-.picker-group label {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: var(--bg); border: 1px solid var(--border);
-  padding: 6px 11px; border-radius: var(--r-md);
-  cursor: pointer; font-size: 13px; font-weight: 500;
-  transition: border-color var(--t-fast), background-color var(--t-fast), box-shadow var(--t-fast);
-}
-.picker-group label input { accent-color: var(--accent); width: 14px; height: 14px; }
-.picker-group label:hover { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
-.picker-group label.active {
-  border-color: var(--accent); background: var(--accent-soft); color: var(--accent-3);
-}
-
-/* Modal — panel .modal-overlay / .modal */
 .modal-overlay {
   position: fixed; inset: 0; background: var(--scrim);
   display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 2000;
@@ -301,248 +233,30 @@ td .mono, .mono { font-family: "Courier Prime", ui-monospace, Consolas, "Courier
   max-height: 90vh; overflow: auto;
 }
 .modal h3 { margin: 0 0 14px; font-size: 18px; font-weight: 700; }
-.modal .keybox {
-  background: var(--bg); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 14px;
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  word-break: break-all; font-size: 13px; margin: 12px 0;
-}
 
-/* Inline toggle (KeyForm enabled checkbox) — styled like panel .switch */
-.switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
-.switch input { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); }
-.switch .track { width: 44px; height: 24px; background: var(--border-strong); border-radius: var(--r-full); position: relative; transition: background var(--t-fast); }
-.switch .thumb { position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; background: var(--on-accent); border-radius: var(--r-full); box-shadow: var(--shadow-sm); transition: transform var(--t-fast); }
-.switch input:checked + .track { background: var(--accent); }
-.switch input:checked + .track .thumb { transform: translateX(20px); }
-.switch input:focus-visible + .track { box-shadow: 0 0 0 3px var(--accent-ring); }
-
-/* ===== Key detail (KeyUsage) page ===== */
-/* Right-aligned numeric cells: applied via the .num class on th/td. Keeps the
-   per-alias usage table's USD / token / call-count columns tidy and scannable. */
-th.num, td.num { text-align: right; }
-/* "strong" = emphasized numeric value (the USD total per alias row). */
-td.strong { font-weight: 600; color: var(--text); }
-
-/* Header row: back button + key id (mono) + name on the left, daily/weekly
-   window toggle on the right. Mirrors the Stitch design's header layout but
-   reuses .btn instead of pill styling for consistency with the rest of the UI. */
-.keyusage-header {
+.fp-head {
   display: flex; align-items: center; justify-content: space-between;
-  flex-wrap: wrap; gap: 12px;
-  margin-bottom: 16px; padding-bottom: 14px;
-  border-bottom: 1px solid var(--border);
+  gap: 12px; flex-wrap: wrap;
 }
-.keyusage-idline { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.keyusage-id { font-size: 13px; background: var(--panel-2); color: var(--muted);
-  padding: 2px 8px; border-radius: var(--r-sm); border: 1px solid var(--border); }
-.keyusage-toggle { display: inline-flex; gap: 6px; }
+.fp-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-/* Empty-state hint above the table: subtle italic muted text. */
-.keyusage-empty {
-  font-style: italic; padding: 10px 14px 18px; font-size: 13px;
-}
-/* No-alias fallback row (a key with zero configured models). */
-.keyusage-noalias { text-align: center; padding: 28px 14px; }
-
-/* Residual alias rows (in_config=false): keep them readable but visually
-   de-emphasized so admins can distinguish historical-only aliases from active
-   ones. The badge marks them inline next to the alias. */
-.keyusage-residual td { opacity: 0.85; }
-.keyusage-badge {
-  display: inline-block; margin-top: 3px;
-  font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
-  color: var(--danger); background: var(--danger-soft);
-  border: 1px solid var(--danger-border);
-  border-radius: var(--r-sm); padding: 1px 6px;
-}
-
-/* ===================================================================
-   MOBILE LAYOUT (@media max-width: 640px)
-   Desktop styles above are untouched. Everything below only applies to
-   phone-width screens, implementing the Stitch "Quiet Paper" mobile design:
-   key cards instead of tables, ink-drop progress bars, horizontal bar
-   rankings, bottom-sheet forms, bottom sticky tab bar. Theme colors come
-   from the same CSS variables, so light/white/dark all work automatically.
-   ==================================================================== */
-
-/* --- Reset desktop-only layout assumptions for narrow screens --- */
-@media (max-width: 640px) {
-  .app { max-width: 100%; margin: 0; padding: 0 16px 88px; }
-
-  /* Header: stack title + actions, allow wrap. Drop the top buttons since
-     the bottom tab bar + FAB replace them on mobile. */
-  .header {
-    flex-wrap: wrap; gap: 12px;
-    padding: 12px 0; margin-bottom: 16px;
-    position: sticky; top: 0; z-index: 50;
-    background: var(--bg);
-  }
-  .header h1 { font-size: 18px; }
-  .header .sub { font-size: 11px; }
-  /* Hide header nav buttons on mobile — replaced by bottom tab bar. */
-  .header .actions { display: none; }
-
-  /* Forms: single column, no 2-col grids. */
-  .row2 { grid-template-columns: 1fr; gap: 12px; }
-  .form-row { margin-bottom: 14px; }
-
-  /* Modal becomes a bottom sheet: full width, anchored to bottom, rounded
-     top corners, grabber handle added by the component. */
-  .modal-overlay { align-items: flex-end; padding: 0; }
-  .modal {
-    max-width: 100%; width: 100%;
-    border-radius: var(--r-lg) var(--r-lg) 0 0;
-    padding: 16px 16px 88px;
-    max-height: 92vh;
-  }
-
-  /* Tables are hidden on mobile — replaced by card stacks. The .card-stack
-     sibling is shown instead. */
-  .card.table-wrap { display: none; }
-  .card-stack { display: block; }
-
-  /* Desktop action rows (refresh/newKey above the table) are hidden on
-     mobile — FAB + pull-to-refresh replace them. */
-  .actions.mobile-hidden { display: none; }
-  .mobile-hidden { display: none !important; }
-  .mobile-only { display: block !important; }
-  a.mobile-only, .keyusage-edit-link.mobile-only { display: inline-flex !important; }
-
-  .mobile-form-header {
-    display: flex; align-items: center; gap: 10px;
-    margin-bottom: 14px; padding-bottom: 12px;
-    border-bottom: 1px solid var(--border);
-  }
-  .mobile-form-header .mfb-back {
-    flex-shrink: 0; font-size: 14px; font-weight: 600;
-    color: var(--accent); text-decoration: none;
-  }
-  .mobile-form-header .mfb-title {
-    margin: 0; font-size: 17px; font-weight: 700;
-    line-height: 1.25; flex: 1; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  }
-  .form-page form.card { margin-top: 0; }
-  .key-form.card { background: transparent; border: none; box-shadow: none; padding: 0; }
-  .kf-section { margin-bottom: 20px; }
-  .kf-section-card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--r-md); padding: 14px 16px;
-  }
-  .kf-section-card .form-row:last-child { margin-bottom: 0; }
-  .kf-hint { font-size: 12px; line-height: 1.45; margin: 8px 0 0; }
-  .kf-warn { font-size: 12px; margin: 8px 0 0; }
-  .kf-access-switch { display: flex; align-items: center; gap: 8px; }
-  .kf-model-list { display: flex; flex-direction: column; gap: 10px; }
-  .kf-model-card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: var(--r-md); overflow: hidden;
-  }
-  .kf-model-head {
-    width: 100%; display: flex; align-items: flex-start; gap: 10px;
-    padding: 12px 14px; border: none; background: none; cursor: pointer;
-    text-align: left; font-family: inherit; color: inherit;
-  }
-  .kf-model-head > div:first-child { flex: 1; min-width: 0; }
-  .kf-model-alias { font-weight: 600; font-size: 15px; }
-  .kf-model-meta { font-size: 12px; margin-top: 2px; }
-  .kf-model-target { font-size: 11px; margin-top: 4px; word-break: break-all; }
-  .kf-chevron { color: var(--muted); flex-shrink: 0; margin-top: 4px; }
-  .kf-mprice-body {
-    padding: 0 14px 14px; border-top: 1px solid var(--border);
-    background: var(--muted-bg);
-  }
-  .kf-billing-seg { margin: 12px 0; width: 100%; }
-  .kf-billing-seg .seg-btn { flex: 1; }
-
-  .keyusage-header .keyusage-idline { width: 100%; }
-  .keyusage-edit-link { margin-left: auto; }
-
-  .tabbar--no-usage .tab { flex: 1; }
-
-  /* KeyForm submit row: sticky bottom on mobile so the primary action stays
-     reachable without scrolling past all model rows. */
-  form.card > .actions {
-    position: sticky; bottom: 64px; z-index: 10;
-    background: var(--panel); padding: 12px 0; margin-top: 12px;
-    border-top: 1px solid var(--border);
-  }
-  form.card > .actions .btn.primary { flex: 1; }
-
-  /* KeyForm pricing table: on mobile, allow horizontal scroll inside the
-     card so wide price rows don't overflow the viewport. */
-  form.card .card.table-wrap { display: block; overflow-x: auto; }
-  form.card .card.table-wrap table { min-width: 520px; }
-}
-
-/* --- Mobile-only component classes (hidden on desktop, shown on mobile) --- */
-/* .card-stack: key list container. On mobile it's a vertical stack;
- * on desktop it becomes a responsive card grid (min-width:641px block). */
 .card-stack { display: flex; flex-direction: column; gap: 10px; }
 @media (min-width: 641px) {
   .card-stack {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
     gap: 16px;
   }
 }
 
-/* .tabbar: bottom sticky navigation. Hidden on desktop by the min-width
-   block; shown on mobile by the max-width block below. */
-.tabbar {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  height: 56px; z-index: 100;
-  background: var(--panel);
-  border-top: 1px solid var(--border);
-  align-items: stretch;
-}
-.tabbar .tab {
-  flex: 1; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 2px;
-  background: none; border: none; cursor: pointer;
-  color: var(--muted); font-size: 11px; font-weight: 600;
-  font-family: inherit; padding: 0;
-  position: relative;
-}
-.tabbar .tab .tab-icon { font-size: 18px; line-height: 1; }
-.tabbar .tab.active { color: var(--accent); }
-.tabbar .tab.active::before {
-  content: ""; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: 24px; height: 2px; background: var(--accent); border-radius: var(--r-full);
-}
-@media (max-width: 640px) {
-  .tabbar { display: flex; }
-}
-
-/* .fab: floating action button. Hidden on desktop. */
-.fab {
-  position: fixed; bottom: 72px; right: 16px; z-index: 99;
-  width: 52px; height: 52px; border-radius: var(--r-full);
-  background: var(--accent); color: var(--on-accent);
-  border: none; cursor: pointer;
-  font-size: 26px; line-height: 1; font-weight: 300;
-  box-shadow: 0 4px 20px rgba(139, 134, 128, 0.28);
-  align-items: center; justify-content: center;
-  transition: transform var(--t-fast), box-shadow var(--t-fast);
-}
-.fab:hover { transform: scale(1.05); }
-.fab:active { transform: scale(0.96); }
-@media (max-width: 640px) {
-  .fab { display: inline-flex; }
-}
-
-/* .keycard: one key in the mobile list. */
 .keycard {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
-  padding: 14px;
-  margin-bottom: 10px;
-  cursor: pointer;
-  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+  padding: 16px 18px;
   position: relative;
   overflow: hidden;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
 }
 .keycard:hover { border-color: var(--border-hover); }
 .keycard.disabled { opacity: 0.55; }
@@ -556,237 +270,78 @@ td.strong { font-weight: 600; color: var(--text); }
 }
 .keycard.disabled .kc-dot { background: var(--danger); }
 .keycard .kc-name { font-weight: 600; font-size: 15px; flex: 1; }
-.keycard .kc-chevron { color: var(--muted); font-size: 16px; }
 .keycard .kc-preview {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
   font-size: 12px; color: var(--muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  margin-bottom: 10px;
+  margin-bottom: 6px;
 }
-/* ink-drop progress bar */
-.keycard .kc-bar {
-  height: 4px; border-radius: var(--r-full);
-  background: var(--muted-bg); overflow: hidden; margin-bottom: 6px;
+.keycard .kc-spend {
+  font-size: 12px; color: var(--muted); margin-bottom: 8px;
 }
-.keycard .kc-bar > span {
-  display: block; height: 100%; border-radius: var(--r-full);
-  background: var(--accent); transition: width var(--t-fast);
+.keycard .kc-models {
+  margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
+  overflow-x: auto;
 }
-.keycard.over .kc-bar > span { background: var(--danger); }
-.keycard .kc-meta {
-  display: flex; justify-content: space-between;
-  font-size: 11px; color: var(--muted);
-}
-.keycard .kc-chips {
-  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
-}
-.keycard .kc-chips .chip {
-  font-size: 11px; padding: 2px 8px; border-radius: var(--r-sm);
-  background: var(--muted-bg); color: var(--muted);
-  border: 1px solid var(--border);
-}
-.keycard .kc-chips .chip.more { color: var(--muted); font-weight: 600; }
-/* swipe-to-revoke layer */
-.keycard .kc-revoke {
-  position: absolute; top: 0; right: 0; bottom: 0;
-  width: 88px; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 4px;
-  background: var(--danger-soft); color: var(--danger);
-  font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
-  border-radius: 0 var(--r-md) var(--r-md) 0;
-}
-.keycard .kc-revoke .revoke-icon { font-size: 18px; }
-
-/* Desktop hover action row (>= 641px). Not an overlay — it sits at the
- * card footer and expands on hover/focus-within, so card info stays visible
- * and the 5 buttons never get clipped (Stitch's inset-0 overlay clipped them
- * on short cards). */
+.keycard .kc-models table { font-size: 12px; }
+.keycard .kc-models th, .keycard .kc-models td { padding: 6px 8px; }
 .keycard .kc-actions {
-  display: none; /* hidden on mobile; grid shown on desktop */
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border);
 }
+.keycard .kc-actions .btn { flex: 0 0 auto; }
 @media (min-width: 641px) {
-  .keycard { cursor: default; margin-bottom: 0; }
   .keycard:hover { border-color: var(--border-hover); box-shadow: 0 0 0 3px var(--accent-ring); }
-  .keycard .kc-actions {
-    display: flex; flex-wrap: wrap; gap: 6px;
-    margin-top: 12px; padding-top: 12px;
-    border-top: 1px solid var(--border);
-    max-height: 0; overflow: hidden; opacity: 0;
-    margin-top: 0; padding-top: 0; border-top-width: 0;
-    transition: max-height var(--t-fast), opacity var(--t-fast), margin-top var(--t-fast), padding-top var(--t-fast), border-top-width var(--t-fast);
-  }
-  .keycard:hover .kc-actions,
-  .keycard:focus-within .kc-actions {
-    max-height: 80px; opacity: 1;
-    margin-top: 12px; padding-top: 12px; border-top-width: 1px;
-  }
-  .keycard.disabled .kc-actions { max-height: 0 !important; opacity: 0 !important; overflow: hidden; }
-  .keycard .kc-actions .btn { flex: 0 0 auto; }
 }
 
-/* .usage-hero: the big-number card at the top of the mobile usage page. */
-.usage-hero {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 18px; margin-bottom: 16px;
+.quota-meter {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin: 12px 0 0;
+  min-width: 0;
 }
-.usage-hero .uh-label {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
-  color: var(--muted); text-transform: uppercase;
+.quota-pill {
+  flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 42px; padding: 4px 10px; margin-top: 0;
+  border-radius: var(--r-full);
+  background: var(--quota-pill-bg); color: var(--quota-pill-fg);
+  font-size: 12px; font-weight: 700; letter-spacing: 0.04em;
 }
-.usage-hero .uh-amount {
-  font-size: 34px; font-weight: 700; line-height: 1.1; margin: 2px 0 12px;
+.quota-main { flex: 1; min-width: 0; }
+.quota-track {
+  width: 100%; height: 8px;
+  background: var(--muted-bg); border-radius: var(--r-full); overflow: hidden;
 }
-.usage-hero .uh-amount .uh-unit {
-  font-size: 14px; font-weight: 400; color: var(--muted); margin-left: 6px;
-}
-.usage-hero .uh-row {
-  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-}
-.usage-hero .uh-ring {
-  width: 64px; height: 64px; position: relative; flex: none;
-}
-.usage-hero .uh-ring svg { transform: rotate(-90deg); }
-.usage-hero .uh-ring .uh-pct {
-  position: absolute; inset: 0; display: flex;
-  align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 700; color: var(--text);
-}
-.usage-hero .uh-limits { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
-.usage-hero .uh-limits .uh-lk { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
-.usage-hero .uh-limits .uh-lv { font-weight: 600; }
-.usage-hero .uh-stats {
-  display: flex; gap: 0; margin-top: 12px;
-  font-size: 11px; color: var(--muted);
-  border-top: 1px solid var(--border); padding-top: 10px;
-}
-.usage-hero .uh-stats > span { flex: 1; text-align: center; }
-.usage-hero .uh-stats > span + span { border-left: 1px solid var(--border); }
-
-/* .seg: segmented daily/weekly toggle. */
-.seg {
-  display: inline-flex; background: var(--muted-bg);
-  border-radius: var(--r-md); padding: 2px; gap: 2px; margin-bottom: 16px;
-}
-.seg .seg-btn {
-  border: none; background: none; cursor: pointer;
-  padding: 6px 16px; border-radius: calc(var(--r-md) - 2px);
-  font-size: 13px; font-weight: 600; color: var(--muted); font-family: inherit;
-  transition: all var(--t-fast);
-}
-.seg .seg-btn.active { background: var(--accent); color: var(--on-accent); }
-
-/* .bar-rank: horizontal bar ranking (replaces the alias table on mobile). */
-.bar-rank { display: flex; flex-direction: column; gap: 12px; }
-.bar-rank .br-row { cursor: pointer; }
-.bar-rank .br-top {
-  display: flex; justify-content: space-between; align-items: baseline;
-  margin-bottom: 5px;
-}
-.bar-rank .br-name { font-size: 14px; font-weight: 600; }
-.bar-rank .br-usd {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 14px; font-weight: 600;
-}
-.bar-rank .br-bar {
-  height: 8px; border-radius: var(--r-full);
-  background: var(--muted-bg); overflow: hidden; margin-bottom: 4px;
-}
-.bar-rank .br-bar > span {
+.quota-track > span {
   display: block; height: 100%; border-radius: var(--r-full);
-  background: var(--accent);
+  background: var(--quota-bar); transition: width var(--t-fast);
 }
-.bar-rank .br-cap {
-  font-size: 11px; color: var(--muted);
+.quota-meter.is-warn .quota-track > span { background: var(--warn); }
+.quota-meter.is-over .quota-track > span { background: var(--danger); }
+.quota-meter.is-none .quota-track > span { background: var(--border-strong); }
+.quota-meta {
+  display: flex; align-items: baseline; gap: 10px;
+  margin-top: 6px; min-width: 0;
+  font-variant-numeric: tabular-nums;
 }
-.bar-rank .br-residual { opacity: 0.7; }
-.bar-rank .br-badge {
-  display: inline-block; margin-left: 6px;
-  font-size: 9px; font-weight: 700; color: var(--danger);
-  background: var(--danger-soft); border: 1px solid var(--danger-border);
-  border-radius: var(--r-sm); padding: 0 4px;
+.quota-amt {
+  flex: 1; min-width: 0;
+  font-size: 13px; font-weight: 600; color: var(--text);
+  white-space: nowrap;
 }
-
-/* .detail-card: dossier card on the key-detail mobile page. */
-.detail-card {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 16px; margin-bottom: 16px;
+.quota-meter.is-over .quota-amt { color: var(--danger); }
+.quota-pct {
+  flex: none;
+  font-size: 13px; font-weight: 700; color: var(--muted);
 }
-.detail-card .dc-statusrow { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-.detail-card .dc-statusrow .dc-dot { width: 8px; height: 8px; border-radius: var(--r-full); background: var(--ok); display: inline-block; margin-right: 6px; }
-.detail-card.disabled .dc-statusrow .dc-dot { background: var(--danger); }
-.detail-card .dc-keypill {
-  background: var(--muted-bg); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 8px 10px; margin-bottom: 12px;
-  display: flex; align-items: center; gap: 8px;
-}
-.detail-card .dc-keypill .dc-keytext {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 12px; color: var(--muted); flex: 1;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.detail-card .dc-keypill .dc-copy {
-  background: none; border: 1px solid var(--border); border-radius: var(--r-sm);
-  color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 8px;
-}
-.detail-card .dc-tiles {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px;
-}
-.detail-card .dc-tile {
-  background: var(--muted-bg); border-radius: var(--r-md); padding: 10px;
-}
-.detail-card .dc-tile .dc-tk { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 700; }
-.detail-card .dc-tile .dc-tv { font-size: 18px; font-weight: 700; line-height: 1.2; }
-.detail-card .dc-tile .dc-ts { font-size: 10px; color: var(--muted); }
-.detail-card .dc-prog { height: 4px; border-radius: var(--r-full); background: var(--muted-bg); overflow: hidden; margin-bottom: 4px; }
-.detail-card .dc-prog > span { display: block; height: 100%; background: var(--accent); }
-.detail-card .dc-progcap { text-align: center; font-size: 11px; color: var(--muted); }
-
-/* .mmodels: model accordion on key-detail mobile. */
-.mmodels { display: flex; flex-direction: column; gap: 8px; }
-.mmodels .mm-row {
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 12px;
-}
-.mmodels .mm-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
-.mmodels .mm-name { font-weight: 600; font-size: 14px; }
-.mmodels .mm-badge {
-  font-size: 10px; font-weight: 700; letter-spacing: 0.04em;
-  padding: 2px 8px; border-radius: var(--r-full);
-  background: var(--muted-bg); color: var(--muted);
-}
-.mmodels .mm-badge.per_call { color: var(--accent); background: var(--accent-soft); }
-.mmodels .mm-target {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 12px; color: var(--muted); margin-bottom: 4px;
-}
-.mmodels .mm-price {
-  font-family: "Courier Prime", ui-monospace, Consolas, monospace;
-  font-size: 11px; color: var(--muted);
-}
-.mmodels .mm-price.per_call { color: var(--accent); }
-
-/* .usage-hero-d: desktop summary hero on the KeyUsage page (3 stat tiles
- * + a usage progress bar). Mobile uses .usage-hero (ring chart) instead. */
-.usage-hero-d {
-  display: none;
-  background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--r-md); padding: 20px; margin-bottom: 16px;
-}
-.usage-hero-d .uhd-tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
-.usage-hero-d .uhd-tile { display: flex; flex-direction: column; gap: 4px; }
-.usage-hero-d .uhd-tk { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
-.usage-hero-d .uhd-tv { font-size: 26px; font-weight: 700; line-height: 1.1; font-family: "Courier Prime", ui-monospace, Consolas, monospace; }
-.usage-hero-d .uhd-tv.accent { color: var(--accent); }
-.usage-hero-d .uhd-bar { height: 6px; border-radius: var(--r-full); background: var(--muted-bg); overflow: hidden; margin-bottom: 6px; }
-.usage-hero-d .uhd-bar > span { display: block; height: 100%; border-radius: var(--r-full); background: var(--accent); }
-.usage-hero-d .uhd-bar.over > span { background: var(--danger); }
-.usage-hero-d .uhd-barcap { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
-.usage-hero-d .uhd-barcap .over { color: var(--danger); font-weight: 600; }
-@media (min-width: 641px) {
-  .usage-hero-d { display: block; }
+.quota-meter.is-over .quota-pct { color: var(--danger); }
+.quota-when {
+  flex: none;
+  font-size: 13px; color: var(--muted);
+  white-space: nowrap;
 }
 
-/* Login centered card (desktop). Mobile keeps the old .app + .header. */
 .login-page {
   min-height: 100vh; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 16px;
@@ -798,284 +353,19 @@ td.strong { font-weight: 600; color: var(--text); }
 .login-page .lp-card { max-width: 460px; width: 100%; padding: 32px; }
 .login-page .lp-card .btn.primary { width: 100%; padding: 12px; margin-top: 4px; }
 .login-page .lp-note { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
-@media (max-width: 640px) {
-  /* On mobile, fall back to the standard .app shell layout for login. */
-  .login-page { min-height: auto; justify-content: flex-start; padding: 0; }
-}
-
-/* Model picker standalone page (desktop + mobile). */
-.model-pick-page { display: flex; flex-direction: column; gap: 16px; }
-.model-pick-page .mp-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-.model-pick-page .mp-head h1 { margin: 0; font-size: 20px; font-weight: 700; flex: 1; min-width: 0; }
-.model-pick-page .mp-sub { font-size: 12px; color: var(--muted); margin-top: -8px; }
-.model-pick-page .mp-search { position: relative; }
-.model-pick-page .mp-search .input { padding-left: 34px; }
-.model-pick-page .mp-search .mp-icon { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 16px; pointer-events: none; }
-.model-pick-page .mp-list { max-height: 60vh; overflow-y: auto; }
-.model-pick-page .mp-footer {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px;
-  position: sticky; bottom: 0; background: var(--bg); padding: 12px 0; border-top: 1px solid var(--border);
-}
-.model-pick-page .mp-footer .mp-count { font-size: 13px; color: var(--muted); }
-.model-pick-page .mp-footer .mp-btns { display: flex; gap: 8px; }
-
-/* Desktop form page: keep 2-col grids, card surface, h1 + actions row. */
-.form-page .fp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
-.form-page .fp-head h1 { margin: 0; font-size: 20px; font-weight: 700; }
-.form-page .fp-head .fp-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.form-page .fp-idline { font-size: 12px; color: var(--muted); margin-bottom: 12px; font-family: "Courier Prime", ui-monospace, Consolas, monospace; }
-.form-page .fp-idline .fp-name { color: var(--text); margin-left: 8px; }
-.form-page .fp-foot { display: flex; align-items: center; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
-.form-page .fp-foot .fp-foot-right { margin-left: auto; display: flex; gap: 8px; }
-.form-page .fp-note { font-size: 12px; color: var(--muted); margin-top: 12px; line-height: 1.5; }
-/* Selected-model chips box on the form (replaces inline picker on desktop). */
-.model-chips-box {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  border: 1px solid var(--border); border-radius: var(--r-md);
-  padding: 12px; background: var(--bg); min-height: 48px;
-}
-.model-chips-box .mc-chip {
-  display: inline-flex; align-items: center; gap: 6px;
-  font-size: 13px; padding: 4px 10px; border-radius: var(--r-full);
-  background: var(--accent-soft); color: var(--accent-3); border: 1px solid var(--accent-ring);
-}
-.model-chips-box .mc-chip .mc-x {
-  cursor: pointer; color: var(--muted); font-weight: 700; border: none; background: none; padding: 0; line-height: 1;
-}
-.model-chips-box .mc-chip .mc-x:hover { color: var(--danger); }
-.model-chips-box .mc-add {
-  font-size: 13px; padding: 6px 12px; border-radius: var(--r-md);
-  background: var(--muted-bg); color: var(--muted); border: 1px dashed var(--border-strong); cursor: pointer; font-family: inherit;
-}
-.model-chips-box .mc-add:hover { border-color: var(--accent); color: var(--accent); }
-.model-chips-box .mc-empty { font-size: 13px; color: var(--muted); }
-@media (max-width: 640px) {
-  .form-page .fp-head h1 { display: none; }
-}
-
-.section-label {
-  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
-  color: var(--muted); text-transform: uppercase;
-  margin: 16px 0 10px;
-}
-
-/* .sechead: section header row with optional chevron. */
-.sechead { display: flex; justify-content: space-between; align-items: center; margin: 16px 0 10px; }
-.sechead .sh-chevron { color: var(--muted); cursor: pointer; }
-
-/* Hide mobile-only blocks on desktop. .card-stack is NOT hidden — it
- * becomes the desktop card grid (see above). .usage-hero stays hidden on
- * desktop because the desktop usage page uses .usage-hero-d instead.
- * .seg is hidden on desktop globally, but the KeyUsage header's toggle is
- * un-hidden below so daily/weekly still works on desktop. */
-@media (min-width: 641px) {
-  .tabbar, .fab, .bar-rank,
-  .detail-card, .mmodels, .section-label, .sechead, .seg,
-  .mobile-only, .mobile-form-header { display: none !important; }
-  /* Desktop shows the top nav; mobile keeps the legacy .header. */
-  .topnav { display: block; }
-  /* KeyUsage header keeps its daily/weekly toggle on desktop. */
-  .keyusage-header .seg { display: inline-flex !important; }
-}
-@media (max-width: 640px) {
-  .topnav { display: none; }
-}
-
-/* ===== Mapping page ===== */
-.map-page { max-width: 1200px; margin: 0 auto; padding: 24px; }
-.map-page-head { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
-.map-page-head h1 { font-size: 18px; font-weight: 700; margin: 0; }
-.map-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
-.map-tab {
-  padding: 8px 20px; font-size: 14px; font-weight: 500; color: var(--muted);
-  border: none; background: none; cursor: pointer; border-bottom: 2px solid transparent;
-  transition: color .15s, border-color .15s;
-}
-.map-tab:hover { color: var(--text); }
-.map-tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
-.map-toolbar { display: flex; justify-content: flex-end; margin-bottom: 16px; }
-
-/* Alias cards grid */
-.alias-grid {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;
-}
-.alias-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
-  transition: border-color .15s;
-}
-.alias-card:hover { border-color: var(--border-hover); }
-.alias-card-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-.alias-card-name { font-family: var(--mono); font-size: 15px; font-weight: 600; }
-.alias-dispatch-badge {
-  font-size: 11px; padding: 2px 8px; border-radius: 999px;
-  background: var(--secondary-bg); color: var(--muted);
-}
-.alias-targets { margin-bottom: 8px; }
-.alias-target-row {
-  font-family: var(--mono); font-size: 13px; color: var(--muted);
-  display: flex; align-items: center; gap: 6px; margin: 2px 0;
-}
-.alias-target-group {
-  font-size: 10px; padding: 1px 6px; border-radius: 999px;
-  background: var(--secondary-bg); color: var(--muted);
-}
-.alias-pricing { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-bottom: 4px; }
-.alias-refs { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
-.alias-refs.zero { color: var(--muted); opacity: 0.6; }
-.alias-actions { display: flex; gap: 8px; opacity: 0; transition: opacity .15s; }
-.alias-card:hover .alias-actions { opacity: 1; }
-.alias-actions .btn.sm { padding: 4px 12px; font-size: 12px; }
-.alias-actions .btn.danger-outline:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* Classify rule list */
-.rule-list { max-width: 800px; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
-.rule-builtin-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
-}
-.rule-builtin-card h3 { font-size: 14px; font-weight: 600; margin: 0 0 8px 0; }
-.rule-builtin-row {
-  font-family: var(--mono); font-size: 13px; color: var(--muted); padding: 4px 0;
-  display: flex; align-items: center; gap: 8px;
-}
-.rule-builtin-row .info-icon { font-size: 12px; color: var(--accent); }
-.rule-builtin-desc { font-size: 12px; color: var(--muted); margin-top: 8px; }
-
-.rule-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
-  transition: border-color .15s;
-}
-.rule-card:hover { border-color: var(--border-hover); }
-.rule-card-head { display: flex; align-items: center; gap: 12px; }
-.rule-card-order { display: flex; flex-direction: column; gap: 2px; }
-.rule-card-order button {
-  background: none; border: 1px solid var(--border); border-radius: 4px;
-  width: 24px; height: 20px; font-size: 10px; color: var(--muted); cursor: pointer;
-}
-.rule-card-order button:hover { border-color: var(--border-hover); color: var(--text); }
-.rule-card-main { flex: 1; }
-.rule-card-name { font-size: 15px; font-weight: 600; }
-.rule-card-sub { font-family: var(--mono); font-size: 13px; color: var(--muted); margin-top: 2px; }
-.rule-card-right { display: flex; align-items: center; gap: 12px; }
-.rule-match-badge {
-  font-size: 12px; padding: 2px 10px; border-radius: 999px;
-  background: var(--accent-soft); color: var(--accent);
-}
-.rule-match-badge.zero { opacity: 0.5; }
-.rule-detail {
-  margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px;
-  max-height: 400px; overflow-y: auto;
-}
-.rule-detail-files { display: flex; flex-direction: column; gap: 2px; }
-.rule-detail-file {
-  font-family: var(--mono); font-size: 13px; color: var(--muted);
-  padding: 2px 0; display: flex; align-items: center; gap: 8px;
-}
-.rule-detail-file .prov-chip {
-  font-size: 10px; padding: 1px 6px; border-radius: 999px;
-  background: var(--secondary-bg); color: var(--muted);
-}
-.rule-pager { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 12px; }
-.rule-pager button { padding: 4px 12px; font-size: 12px; }
-.rule-pager button:disabled { opacity: 0.4; cursor: not-allowed; }
-.rule-pager .page-info { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-
-/* Alias/Rule edit form */
-.map-form-page { max-width: 600px; margin: 0 auto; padding: 24px; }
-.map-form-card {
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 24px;
-}
-.map-form-head { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-.map-form-head h1 { font-size: 18px; font-weight: 700; margin: 0; }
-.map-form-head .back-link { color: var(--accent); font-size: 14px; }
-.map-form-row { margin-bottom: 16px; }
-.map-form-row label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 4px; }
-.map-form-row input, .map-form-row select {
-  width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px;
-  font-size: 14px; background: var(--card); color: var(--text);
-}
-.map-form-row input.mono { font-family: var(--mono); }
-.map-form-row input:focus, .map-form-row select:focus {
-  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
-}
-.map-form-radio-group { display: flex; gap: 16px; }
-.map-form-radio { display: flex; flex-direction: column; gap: 2px; }
-.map-form-radio label { font-size: 14px; font-weight: 500; }
-.map-form-radio-desc { font-size: 12px; color: var(--muted); }
-
-/* Dispatch mode: card-style segmented control (replaces bare radios). */
-.map-dispatch-seg {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.map-dispatch-btn {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-  text-align: left;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--panel, var(--card));
-  color: var(--text);
-  cursor: pointer;
-  font-family: inherit;
-  transition: border-color var(--t-fast, .15s), background var(--t-fast, .15s), box-shadow var(--t-fast, .15s);
-}
-.map-dispatch-btn:hover {
-  border-color: var(--border-hover, var(--border-strong, var(--border)));
-  background: var(--row-hover, var(--secondary-bg, var(--muted-bg)));
-}
-.map-dispatch-btn.active {
-  border-color: var(--accent);
-  background: var(--accent-soft, rgba(139, 134, 128, .12));
-  box-shadow: 0 0 0 3px var(--accent-ring, rgba(139, 134, 128, .18));
-}
-.map-dispatch-title {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-.map-dispatch-btn.active .map-dispatch-title { color: var(--text); }
-.map-dispatch-desc {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--muted);
-  font-weight: 400;
-}
-@media (max-width: 640px) {
-  .map-dispatch-seg { grid-template-columns: 1fr; }
-}
-.map-form-targets { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
-.map-form-target-row {
-  display: flex; align-items: center; gap: 8px; padding: 6px 12px;
-  background: var(--secondary-bg); border-radius: 6px;
-}
-.map-form-target-row .mono { font-family: var(--mono); font-size: 13px; flex: 1; }
-.map-form-target-row .remove-btn {
-  background: none; border: none; color: var(--danger); font-size: 16px; cursor: pointer;
-}
-.regex-valid { color: var(--ok); font-size: 12px; display: flex; align-items: center; gap: 4px; }
-.regex-invalid { color: var(--danger); font-size: 12px; }
-.map-form-foot { display: flex; gap: 12px; margin-top: 24px; }
 
 @media (max-width: 640px) {
-  .alias-grid { grid-template-columns: 1fr; }
-  .rule-list { max-width: 100%; }
-  .map-form-page { padding: 16px; }
-}
-
-/* KeyForm existing-aliases quick-pick section */
-.kf-alias-pick { margin-bottom: 12px; }
-.kf-alias-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.kf-alias-chip {
-  font-family: var(--mono); font-size: 12px; padding: 4px 12px;
-  border: 1px solid var(--border); border-radius: 999px; background: var(--card);
-  color: var(--muted); cursor: pointer; transition: all .15s;
-}
-.kf-alias-chip:hover { border-color: var(--border-hover); color: var(--text); }
-.kf-alias-chip.selected {
-  background: var(--accent-soft); border-color: var(--accent); color: var(--accent);
-  font-weight: 600;
+  .app { max-width: 100%; margin: 0; padding: 16px 16px 40px; }
+  .topnav { margin: 0 -16px 16px; padding: 0 16px; }
+  .topnav-inner { min-height: 52px; padding: 8px 0; }
+  .row2 { grid-template-columns: 1fr; gap: 12px; }
+  .form-row { margin-bottom: 14px; }
+  .modal-overlay { align-items: flex-end; padding: 0; }
+  .modal {
+    max-width: 100%; width: 100%;
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding: 16px;
+    max-height: 92vh;
+  }
+  .login-page { min-height: auto; justify-content: flex-start; padding: 24px 16px; }
 }

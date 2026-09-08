@@ -1,5 +1,11 @@
-# Example CLIProxyAPI snippet for cpa-key-quota.
-# Bind existing Plus api-keys. Do not put plugin-issued keys into api-keys.
+# CLIProxyAPI config fragment for plugin id cpa-key-quota.
+# Bind keys that already exist in Plus api-keys. Do not put plugin-issued
+# secrets into api-keys — Plus still authenticates.
+#
+# USD billing depends on CPA-Manager-Plus: this plugin has no price table.
+# plus_base_url must be reachable from the CPA process (Docker DNS, not a
+# public hostname). plus_management_key is the Plus admin key
+# (CPA_MANAGER_ADMIN_KEY), not CPA remote-management.secret-key.
 
 plugins:
   enabled: true
@@ -8,9 +14,14 @@ plugins:
     cpa-key-quota:
       enabled: true
       priority: 10
+      # Bound policies + usage. Created if missing. Keep this file private.
       state_file: "cpa-key-quota-state.json"
-      # Price table (optional). Empty URL = RPM only, no USD limits.
-      # CPA-Manager-Plus: GET /v0/management/model-prices (Bearer admin key).
-      # Home/Plus fallback: GET /v0/management/billing/model-prices.
-      plus_base_url: "http://127.0.0.1:18317"
+      # CPA-Manager-Plus base URL. GET /v0/management/model-prices
+      # (404 → GET /v0/management/billing/model-prices).
+      # Empty URL = RPM only (no USD limits, no Plus sync).
+      plus_base_url: "http://cpa-manager-plus:18317"
+      # Plus admin Bearer: price listing + POST .../keys/sync
+      # (Plus GET /v0/management/api-keys). Treat as a host secret.
       plus_management_key: "replace-with-manager-plus-admin-key"
+      # Optional seed. Ignored once state_file exists.
+      # keys: []

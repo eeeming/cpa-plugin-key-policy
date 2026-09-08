@@ -51,10 +51,30 @@ func MatchHash(key, hash string) bool {
 
 func PreviewKey(key string) string {
 	key = strings.TrimSpace(key)
+	if key == "" {
+		return ""
+	}
+	// Never persist or display the full secret, even for short keys.
 	if len(key) <= 12 {
-		return key
+		if len(key) < 6 {
+			return "***"
+		}
+		return fmt.Sprintf("%s...%s", key[:2], key[len(key)-2:])
 	}
 	return fmt.Sprintf("%s...%s", key[:7], key[len(key)-5:])
+}
+
+// SanitizeStoredPreview remasks previews persisted before PreviewKey always
+// truncated secrets (full key stored when len ≤ 12).
+func SanitizeStoredPreview(preview string) string {
+	preview = strings.TrimSpace(preview)
+	if preview == "" || strings.Contains(preview, "...") {
+		return preview
+	}
+	if len(preview) <= 12 {
+		return "***"
+	}
+	return preview
 }
 
 func ExtractAPIKey(headers http.Header, query map[string][]string) string {
