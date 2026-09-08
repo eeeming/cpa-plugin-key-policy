@@ -57,8 +57,8 @@ export default function KeyCard({
         />
         <span className="kc-check-box" aria-hidden="true" />
       </label>
-      <div className="kc-head">
-        <span className="kc-dot" />
+      <span className="kc-dot" />
+      <div className="kc-title">
         <span className="kc-name">{k.name}</span>
         <span className={"tag" + (k.enabled ? (over ? " off" : " on") : " off")}>{statusLabel}</span>
       </div>
