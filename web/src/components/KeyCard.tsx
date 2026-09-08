@@ -8,9 +8,11 @@ import { formatUsd } from "../quota";
 export default function KeyCard({
   k,
   actions,
+  selected,
 }: {
   k: KeyPublic;
   actions?: ReactNode;
+  selected?: boolean;
 }) {
   const t = useT();
   const st = quotaStatus(k);
@@ -40,7 +42,10 @@ export default function KeyCard({
   };
 
   return (
-    <div className={"keycard" + (k.enabled ? "" : " disabled") + (over ? " over" : "")}>
+    <div
+      data-key-id={k.id}
+      className={"keycard" + (k.enabled ? "" : " disabled") + (over ? " over" : "") + (selected ? " selected" : "")}
+    >
       <div className="kc-head">
         <span className="kc-dot" />
         <span className="kc-name">{k.name}</span>

@@ -37,6 +37,18 @@ export async function syncPlusKeys(): Promise<SyncPlusResult> {
   return data;
 }
 
+export interface ResetWindowsResult {
+  reset: number;
+  ids: string[];
+  failed?: string[];
+}
+
+export async function resetWindows(ids: string[]): Promise<ResetWindowsResult> {
+  const c = apiClient();
+  const { data } = await c.post<ResetWindowsResult>(pluginPath("/keys/reset-windows"), { ids });
+  return data;
+}
+
 export async function fetchKeyUsage(id: string): Promise<KeyUsageResponse> {
   const c = apiClient();
   const { data } = await c.get<KeyUsageResponse>(pluginPath("/keys/usage"), {

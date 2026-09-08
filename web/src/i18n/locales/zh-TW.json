@@ -38,7 +38,22 @@
     "enabled": "启用",
     "disabled": "停用",
     "colDaily": "日限額（24h）",
-    "unlimited": "不限"
+    "unlimited": "不限",
+    "selectAll": "全選",
+    "invert": "反選",
+    "selectedCount": "已選 {{count}}",
+    "setLimits": "設置限額",
+    "setLimitsTitle": "為所選 Key 設置限額",
+    "setLimitsDone": "已更新 {{count}} 把 Key 的限額。",
+    "reset": "重置",
+    "resetConfirm": "將 Reset {{count}} 把 Key 的插件 24H/7D 已用量，限額不變。Plus 用量不變。",
+    "resetDone": "已重置 {{count}} 把。失敗 {{failed}}。",
+    "resetOneConfirm": "將 Reset「{{name}}」的插件 24H/7D 已用量，限額不變。Plus 用量不變。",
+    "bulkDisableConfirm": "停用所選 {{count}} 把 Key 的限額策略？Plus 側仍可調用。",
+    "bulkDisableDone": "已停用 {{count}} 把。",
+    "bulkUnbindConfirm": "解綁所選 {{count}} 把 Key？Plus api-keys 不會被刪除。",
+    "bulkUnbindDone": "已解綁 {{count}} 把。",
+    "bulkFailed": "部分失敗：{{detail}}"
   },
   "bind": {
     "title": "绑定已有 Key",

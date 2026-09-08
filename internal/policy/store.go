@@ -671,6 +671,54 @@ func (s *Store) DeleteKey(id string) error {
 	return s.persistCurrentState()
 }
 
+type ResetWindowsResult struct {
+	Reset  int      `json:"reset"`
+	IDs    []string `json:"ids"`
+	Failed []string `json:"failed,omitempty"`
+}
+
+// ResetWindows zeros rolling usage and the RPM minute bucket for bound keys.
+// Daily/weekly/RPM limit numbers, names, and enabled flags are unchanged.
+func (s *Store) ResetWindows(ids []string) (ResetWindowsResult, error) {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	out := ResetWindowsResult{IDs: []string{}}
+	seen := map[string]struct{}{}
+	for _, raw := range ids {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		s.mu.RLock()
+		_, ok := s.keys[id]
+		limiter := s.limiter
+		usageLedger := s.usage
+		s.mu.RUnlock()
+		if !ok {
+			out.Failed = append(out.Failed, id)
+			continue
+		}
+		if limiter != nil {
+			limiter.Reset(id)
+		}
+		if usageLedger != nil {
+			usageLedger.resetUsage(id)
+		}
+		out.Reset++
+		out.IDs = append(out.IDs, id)
+	}
+	if out.Reset > 0 {
+		if err := s.persistCurrentState(); err != nil {
+			return out, err
+		}
+	}
+	return out, nil
+}
+
 func (s *Store) usageSnapshotLocked() map[string]*UsageState {
 	if s.usage == nil {
 		return nil

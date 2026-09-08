@@ -240,7 +240,19 @@ th.num, td.num { text-align: right; }
 }
 .fp-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 
-.card-stack { display: flex; flex-direction: column; gap: 10px; }
+.card-stack { display: flex; flex-direction: column; gap: 10px; position: relative; user-select: none; }
+.marquee {
+  position: absolute;
+  border: 1px dashed var(--accent);
+  background: var(--accent-soft);
+  pointer-events: none;
+  z-index: 4;
+}
+.keycard.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-ring);
+}
+.sel-bar { padding-bottom: 4px; }
 @media (min-width: 641px) {
   .card-stack {
     display: grid;

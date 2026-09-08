@@ -38,7 +38,22 @@
     "enabled": "Enabled",
     "disabled": "Disabled",
     "colDaily": "Daily (24h)",
-    "unlimited": "Unlimited"
+    "unlimited": "Unlimited",
+    "selectAll": "Select all",
+    "invert": "Invert",
+    "selectedCount": "{{count}} selected",
+    "setLimits": "Set limits",
+    "setLimitsTitle": "Set limits for selected keys",
+    "setLimitsDone": "Updated limits on {{count}} keys.",
+    "reset": "Reset",
+    "resetConfirm": "Reset plugin 24H/7D usage for {{count}} keys? Limits stay the same. Plus usage is not cleared.",
+    "resetDone": "Reset {{count}} keys. Failed: {{failed}}.",
+    "resetOneConfirm": "Reset plugin 24H/7D usage for “{{name}}”? Limits stay the same. Plus usage is not cleared.",
+    "bulkDisableConfirm": "Disable quota for {{count}} selected keys? Plus will still serve them.",
+    "bulkDisableDone": "Disabled {{count}} keys.",
+    "bulkUnbindConfirm": "Unbind {{count}} selected keys? Plus api-keys are not deleted.",
+    "bulkUnbindDone": "Unbound {{count}} keys.",
+    "bulkFailed": "Some keys failed: {{detail}}"
   },
   "bind": {
     "title": "Bind existing key",
