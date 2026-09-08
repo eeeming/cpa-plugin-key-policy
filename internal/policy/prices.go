@@ -187,12 +187,34 @@ func isJSONObject(raw json.RawMessage) bool {
 }
 
 type cpampPrice struct {
-	Prompt       float64 `json:"prompt"`
-	Completion   float64 `json:"completion"`
-	Cache        float64 `json:"cache"`
-	CacheRead    float64 `json:"cacheRead"`
-	CacheWrite   float64 `json:"cacheWrite"`
-	RequestPrice float64 `json:"requestPrice"`
+	Prompt        float64            `json:"prompt"`
+	Completion    float64            `json:"completion"`
+	Cache         float64            `json:"cache"`
+	CacheRead     float64            `json:"cacheRead"`
+	CacheWrite    float64            `json:"cacheWrite"`
+	CacheCreation float64            `json:"cacheCreation"`
+	RequestPrice  float64            `json:"requestPrice"`
+	ContextTiers  []cpampContextTier `json:"contextTiers"`
+	ServiceTiers  []cpampServiceTier `json:"serviceTiers"`
+}
+
+type cpampContextTier struct {
+	ThresholdTokens int64   `json:"thresholdTokens"`
+	Prompt          float64 `json:"prompt"`
+	Completion      float64 `json:"completion"`
+	Cache           float64 `json:"cache"`
+	CacheRead       float64 `json:"cacheRead"`
+	CacheCreation   float64 `json:"cacheCreation"`
+}
+
+type cpampServiceTier struct {
+	Mode          string  `json:"mode"`
+	ServiceTier   string  `json:"serviceTier"`
+	Prompt        float64 `json:"prompt"`
+	Completion    float64 `json:"completion"`
+	Cache         float64 `json:"cache"`
+	CacheRead     float64 `json:"cacheRead"`
+	CacheCreation float64 `json:"cacheCreation"`
 }
 
 func parseCPAMPPrices(raw json.RawMessage) ([]ModelPrice, error) {
@@ -200,29 +222,66 @@ func parseCPAMPPrices(raw json.RawMessage) ([]ModelPrice, error) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, err
 	}
-	out := make([]ModelPrice, 0, len(m))
+	out := make([]ModelPrice, 0, len(m)*3)
 	for model, p := range m {
 		model = strings.TrimSpace(model)
 		if model == "" {
 			continue
 		}
-		cacheRead := p.CacheRead
-		if cacheRead == 0 {
-			cacheRead = p.Cache
+		out = append(out, cpampRow(model, "*", 0, p.Prompt, p.Completion, p.Cache, p.CacheRead, p.CacheWrite, p.CacheCreation, p.RequestPrice))
+		for _, tier := range p.ContextTiers {
+			minTok := tier.ThresholdTokens
+			if minTok > 0 {
+				minTok++ // Plus: high band when input is strictly greater than threshold.
+			}
+			out = append(out, cpampRow(model, "*", minTok, tier.Prompt, tier.Completion, tier.Cache, tier.CacheRead, 0, tier.CacheCreation, p.RequestPrice))
 		}
-		out = append(out, ModelPrice{
-			Model:                     model,
-			ServiceTier:               "*",
-			MinInputTokens:            0,
-			InputPricePerMillion:      p.Prompt,
-			OutputPricePerMillion:     p.Completion,
-			CacheReadPricePerMillion:  cacheRead,
-			CacheWritePricePerMillion: p.CacheWrite,
-			RequestPrice:              p.RequestPrice,
-			Enabled:                   true,
-		})
+		for _, tier := range p.ServiceTiers {
+			name := strings.ToLower(strings.TrimSpace(tier.ServiceTier))
+			if name == "" {
+				name = strings.ToLower(strings.TrimSpace(tier.Mode))
+			}
+			if name == "" {
+				continue
+			}
+			row := cpampRow(model, name, 0, tier.Prompt, tier.Completion, tier.Cache, tier.CacheRead, 0, tier.CacheCreation, p.RequestPrice)
+			out = append(out, row)
+			if mode := strings.ToLower(strings.TrimSpace(tier.Mode)); mode != "" && mode != name {
+				dup := row
+				dup.ServiceTier = mode
+				out = append(out, dup)
+			}
+		}
 	}
 	return out, nil
+}
+
+func cpampRow(model, serviceTier string, minTok int64, prompt, completion, cache, cacheRead, cacheWrite, cacheCreation, request float64) ModelPrice {
+	read := cacheRead
+	if read == 0 {
+		read = cache
+	}
+	if read == 0 && prompt != 0 {
+		read = prompt * 0.1 // Plus fallback when cache-read is unset.
+	}
+	write := cacheWrite
+	if write == 0 {
+		write = cacheCreation
+	}
+	if serviceTier == "" {
+		serviceTier = "*"
+	}
+	return ModelPrice{
+		Model:                     model,
+		ServiceTier:               serviceTier,
+		MinInputTokens:            minTok,
+		InputPricePerMillion:      prompt,
+		OutputPricePerMillion:     completion,
+		CacheReadPricePerMillion:  read,
+		CacheWritePricePerMillion: write,
+		RequestPrice:              request,
+		Enabled:                   true,
+	}
 }
 
 func normalizeListedPrices(list []wirePrice) []ModelPrice {

@@ -18,12 +18,12 @@ type Store struct {
 	enabled   bool
 	statePath string
 
-	keys           map[string]*KeyConfig
-	keysByHash     map[string]*KeyConfig
-	keysByScope    map[string]*KeyConfig
-	limiter        *RateLimiter
-	usage          *usageLedger
-	flusher        *usageFlusher
+	keys        map[string]*KeyConfig
+	keysByHash  map[string]*KeyConfig
+	keysByScope map[string]*KeyConfig
+	limiter     *RateLimiter
+	usage       *usageLedger
+	flusher     *usageFlusher
 
 	listPrices     PriceLister
 	priceMu        sync.Mutex
@@ -295,7 +295,11 @@ func (s *Store) RecordUsage(apiKeyOrID, alias, model, provider, serviceTier stri
 				true,
 				detail,
 			)
-			if rule.CacheWritePricePerMillion != 0 && detail.CacheCreationTokens > 0 && isCacheAdditiveProvider(provider) {
+			if rule.CacheWritePricePerMillion != 0 && detail.CacheCreationTokens > 0 {
+				// Plus bills cache writes at cacheCreation (often 1.25× prompt).
+				// Subset providers already included those tokens at the input
+				// price; additive providers added them at the input price too.
+				// Reprice the write delta for both so we match Plus.
 				cost += float64(detail.CacheCreationTokens) / 1_000_000 * (rule.CacheWritePricePerMillion - rule.InputPricePerMillion)
 			}
 			cost += rule.RequestPrice

@@ -87,6 +87,38 @@ func TestParseCPAMPPricesMap(t *testing.T) {
 	}
 }
 
+func TestParseCPAMPPricesExpandsContextAndServiceTiers(t *testing.T) {
+	raw := []byte(`{"prices":{"gpt-5.6-sol":{
+		"prompt":5,"completion":30,"cacheRead":0.5,"cacheCreation":6.25,
+		"contextTiers":[{"thresholdTokens":272000,"prompt":10,"completion":45,"cacheRead":1,"cacheCreation":12.5}],
+		"serviceTiers":[{"mode":"fast","serviceTier":"priority","prompt":10,"completion":60,"cacheRead":1,"cacheCreation":12.5}]
+	}}}`)
+	list, err := ParseModelPrices(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base, ok := MatchPrice(list, "openai", "gpt-5.6-sol", "standard", 1000)
+	if !ok || base.InputPricePerMillion != 5 || base.CacheReadPricePerMillion != 0.5 || base.CacheWritePricePerMillion != 6.25 {
+		t.Fatalf("base = %+v ok=%v", base, ok)
+	}
+	prio, ok := MatchPrice(list, "openai", "gpt-5.6-sol", "priority", 1000)
+	if !ok || prio.InputPricePerMillion != 10 || prio.OutputPricePerMillion != 60 {
+		t.Fatalf("priority = %+v ok=%v", prio, ok)
+	}
+	fast, ok := MatchPrice(list, "openai", "gpt-5.6-sol", "fast", 1000)
+	if !ok || fast.InputPricePerMillion != 10 {
+		t.Fatalf("fast = %+v ok=%v", fast, ok)
+	}
+	long, ok := MatchPrice(list, "openai", "gpt-5.6-sol", "standard", 272001)
+	if !ok || long.MinInputTokens != 272001 || long.InputPricePerMillion != 10 || long.OutputPricePerMillion != 45 {
+		t.Fatalf("long context = %+v ok=%v", long, ok)
+	}
+	justUnder, ok := MatchPrice(list, "openai", "gpt-5.6-sol", "standard", 272000)
+	if !ok || justUnder.InputPricePerMillion != 5 {
+		t.Fatalf("at threshold stays base = %+v ok=%v", justUnder, ok)
+	}
+}
+
 func TestHTTPPriceLister(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v0/management/billing/model-prices" {

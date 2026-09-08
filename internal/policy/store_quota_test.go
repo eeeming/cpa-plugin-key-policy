@@ -98,6 +98,45 @@ func TestRecordUsageBillsMatchedPriceAndBlocksDaily(t *testing.T) {
 	}
 }
 
+func TestRecordUsageMatchesPlusInputOutputCacheSplit(t *testing.T) {
+	store := configureQuotaStore(t)
+	list, err := ParseModelPrices([]byte(`{"prices":{"gpt-5.6-sol":{"prompt":5,"completion":30,"cacheRead":0.5,"cacheCreation":6.25}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.SetPriceLister(func() ([]ModelPrice, error) { return list, nil })
+	bindTestKey(t, store, "paid", "sk-paid", 100, 100)
+	// Live gomami 李益茗 gpt-5.6-sol aggregate: uncached 92686, cache 423424, out 4043.
+	cost := store.RecordUsage("sk-paid", "gpt-5.6-sol", "gpt-5.6-sol", "openai", "standard", false, UsageDetail{
+		InputTokens: 92686 + 423424, OutputTokens: 4043, CacheReadTokens: 423424,
+	})
+	want := 92686.0*5/1e6 + 423424.0*0.5/1e6 + 4043.0*30/1e6
+	if !nearly(cost, want) {
+		t.Fatalf("cost = %v want %v", cost, want)
+	}
+}
+
+func TestRecordUsageRepricesCacheWritesAndPriority(t *testing.T) {
+	store := configureQuotaStore(t)
+	list, err := ParseModelPrices([]byte(`{"prices":{"gpt-5.6-sol":{
+		"prompt":5,"completion":30,"cacheRead":0.5,"cacheCreation":6.25,
+		"serviceTiers":[{"serviceTier":"priority","prompt":10,"completion":60,"cacheRead":1,"cacheCreation":12.5}]
+	}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.SetPriceLister(func() ([]ModelPrice, error) { return list, nil })
+	bindTestKey(t, store, "paid", "sk-paid", 100, 100)
+	cost := store.RecordUsage("sk-paid", "gpt-5.6-sol", "gpt-5.6-sol", "openai", "priority", false, UsageDetail{
+		InputTokens: 1000, OutputTokens: 100, CachedTokens: 200, CacheCreationTokens: 50,
+	})
+	// Plus: uncached 1000-200-50=750 @10, cache read 200 @1, cache write 50 @12.5, out 100 @60.
+	want := 750.0*10/1e6 + 200.0*1/1e6 + 50.0*12.5/1e6 + 100.0*60/1e6
+	if !nearly(cost, want) {
+		t.Fatalf("priority+write cost = %v want %v", cost, want)
+	}
+}
+
 func TestMissingPricesSkipUSDButKeepRPM(t *testing.T) {
 	store := configureQuotaStore(t)
 	store.SetPriceLister(func() ([]ModelPrice, error) {
