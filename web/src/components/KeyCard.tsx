@@ -48,13 +48,16 @@ export default function KeyCard({
       data-key-id={k.id}
       className={"keycard" + (k.enabled ? "" : " disabled") + (over ? " over" : "") + (selected ? " selected" : "")}
     >
-      <div className="kc-head">
-        <button
-          type="button"
-          className={"kc-check" + (selected ? " on" : "")}
-          aria-pressed={!!selected}
-          onClick={(e) => { e.stopPropagation(); onToggleSelect?.(); }}
+      <label className={"kc-check" + (selected ? " on" : "")}>
+        <input
+          type="checkbox"
+          checked={!!selected}
+          onChange={() => onToggleSelect?.()}
+          aria-label={k.name}
         />
+        <span className="kc-check-box" aria-hidden="true" />
+      </label>
+      <div className="kc-head">
         <span className="kc-dot" />
         <span className="kc-name">{k.name}</span>
         <span className={"tag" + (k.enabled ? (over ? " off" : " on") : " off")}>{statusLabel}</span>
