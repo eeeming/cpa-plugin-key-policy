@@ -28,6 +28,11 @@ type PriceLister func() ([]ModelPrice, error)
 
 const priceCacheTTL = 30 * time.Second
 
+// priceFetchWait bounds how long a cold-start request waits for the in-flight
+// first price fetch. It matches the lister's HTTP client timeout, so a request
+// waits at most as long as the fetch that triggered it could take.
+const priceFetchWait = 15 * time.Second
+
 // NormalizeServiceTier maps Plus aliases onto the local Standard tier.
 func NormalizeServiceTier(tier string) string {
 	switch strings.ToLower(strings.TrimSpace(tier)) {

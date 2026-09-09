@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // An operator who removes plus_base_url and reconfigures the plugin must stop
@@ -118,6 +119,50 @@ func TestStalePriceFetchDiscardedAfterReconfigure(t *testing.T) {
 	prices, ok := store.cachedPrices()
 	if !ok || len(prices) != 1 || prices[0].Model != "fresh" {
 		t.Fatalf("stale in-flight result was committed: %+v", prices)
+	}
+}
+
+// A request that arrives while the first price fetch is still in flight must
+// wait for it instead of admitting with USD enforcement disabled.
+func TestColdStartWaitsForInFlightPriceFetch(t *testing.T) {
+	store := NewStore()
+	if err := store.Configure(Config{Enabled: true, StateFile: filepath.Join(t.TempDir(), "state.json")}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(store.StopUsageFlusher)
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var calls int32
+	store.SetPriceLister(func() ([]ModelPrice, error) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			close(started)
+			<-release
+		}
+		return []ModelPrice{{Model: "m", ServiceTier: "*", InputPricePerMillion: 1, Enabled: true}}, nil
+	})
+
+	first := make(chan bool, 1)
+	go func() { first <- store.PricesAvailable() }()
+	<-started
+
+	second := make(chan bool, 1)
+	go func() { second <- store.PricesAvailable() }()
+	select {
+	case got := <-second:
+		t.Fatalf("second caller returned early with prices=%v", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(release)
+	if !<-first {
+		t.Fatal("first caller should see the price table")
+	}
+	if !<-second {
+		t.Fatal("second caller should see the price table after waiting")
+	}
+	if got := atomic.LoadInt32(&calls); got != 1 {
+		t.Fatalf("price fetch calls = %d, want 1 (waiters must not refetch)", got)
 	}
 }
 

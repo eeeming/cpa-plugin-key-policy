@@ -36,6 +36,10 @@ type Store struct {
 	// fetch captures it and discards its result if the source changed, so a
 	// reconfigure cannot resurrect the previous table.
 	priceGen uint64
+	// priceWait is closed when the in-flight fetch finishes. Cold-start callers
+	// wait on it so a request never admits with USD enforcement disabled just
+	// because another request happened to start the first fetch.
+	priceWait chan struct{}
 }
 
 type AdmitDecision struct {
@@ -258,10 +262,23 @@ func (s *Store) refreshPrices(force bool) {
 		return
 	}
 	if s.priceRefreshing {
+		wait := s.priceWait
+		ready := s.pricesReady
 		s.priceMu.Unlock()
+		if !ready && wait != nil {
+			// Cold start with no table yet: wait for the in-flight fetch instead
+			// of admitting requests with USD enforcement silently disabled.
+			// Bounded so a hung Plus cannot stall requests indefinitely.
+			select {
+			case <-wait:
+			case <-time.After(priceFetchWait):
+			}
+		}
 		return
 	}
+	wait := make(chan struct{})
 	s.priceRefreshing = true
+	s.priceWait = wait
 	gen := s.priceGen
 	s.priceMu.Unlock()
 	list, err := lister()
@@ -270,9 +287,14 @@ func (s *Store) refreshPrices(force bool) {
 	if s.priceGen != gen {
 		// The price source was reconfigured while this fetch was in flight:
 		// discard the stale result instead of resurrecting the old table.
+		if s.priceWait == wait {
+			s.priceWait = nil
+		}
+		close(wait)
 		return
 	}
 	s.priceRefreshing = false
+	s.priceWait = nil
 	s.priceFetchedAt = time.Now()
 	if err != nil {
 		// Keep the last good table so USD limits do not fail open.
@@ -280,10 +302,14 @@ func (s *Store) refreshPrices(force bool) {
 		if len(s.priceCache) == 0 {
 			s.pricesReady = false
 		}
+		close(wait)
 		return
 	}
 	s.priceCache = list
 	s.pricesReady = true
+	// Wake cold-start waiters only after the table is published (the deferred
+	// unlock keeps them from reading state before this point).
+	close(wait)
 }
 
 func (s *Store) cachedPrices() ([]ModelPrice, bool) {
