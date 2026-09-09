@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,10 +33,12 @@ type Store struct {
 	pricesReady     bool
 	priceFetchedAt  time.Time
 	priceRefreshing bool
-	// priceGen increments whenever the price source is replaced. An in-flight
-	// fetch captures it and discards its result if the source changed, so a
-	// reconfigure cannot resurrect the previous table.
-	priceGen uint64
+	// priceGen is bumped under s.mu in the same critical section that replaces
+	// listPrices, so a fetch can snapshot the (lister, generation) pair
+	// atomically and discard its result if the source was replaced meanwhile.
+	// Without that pairing, a reconfigure landing between the two reads would
+	// let the old source's table commit under the new generation.
+	priceGen atomic.Uint64
 	// priceWait is closed when the in-flight fetch finishes. Cold-start callers
 	// wait on it so a request never admits with USD enforcement disabled just
 	// because another request happened to start the first fetch.
@@ -75,16 +78,18 @@ func (s *Store) SetClock(now func() time.Time) {
 func (s *Store) SetPriceLister(fn PriceLister) {
 	s.mu.Lock()
 	s.listPrices = fn
+	s.priceGen.Add(1)
 	s.mu.Unlock()
 	s.resetPriceCache()
 }
 
 // resetPriceCache drops the cached table and invalidates any in-flight fetch.
 // It is called whenever the price source changes so the next Admit re-syncs the
-// latest table from the currently configured source.
+// latest table from the currently configured source. The generation bump that
+// invalidates the in-flight fetch happens in the caller, under s.mu, together
+// with the source swap.
 func (s *Store) resetPriceCache() {
 	s.priceMu.Lock()
-	s.priceGen++
 	s.priceCache = nil
 	s.pricesReady = false
 	s.priceFetchedAt = time.Time{}
@@ -165,6 +170,9 @@ func (s *Store) Configure(cfg Config) error {
 		s.listPrices = nil
 		s.listAPIKeys = nil
 	}
+	// Bump the generation in the same critical section as the source swap so a
+	// concurrent fetch snapshots a consistent (lister, generation) pair.
+	s.priceGen.Add(1)
 
 	s.mu.Unlock()
 	// A (re)configure always re-syncs the latest price table from the source
@@ -246,8 +254,12 @@ func (s *Store) PricesAvailable() bool {
 }
 
 func (s *Store) refreshPrices(force bool) {
+	// Snapshot the source and its generation together: the generation is only
+	// meaningful relative to the lister it was captured with, and a reconfigure
+	// bumps both under s.mu.
 	s.mu.RLock()
 	lister := s.listPrices
+	gen := s.priceGen.Load()
 	s.mu.RUnlock()
 	if lister == nil {
 		s.priceMu.Lock()
@@ -279,12 +291,11 @@ func (s *Store) refreshPrices(force bool) {
 	wait := make(chan struct{})
 	s.priceRefreshing = true
 	s.priceWait = wait
-	gen := s.priceGen
 	s.priceMu.Unlock()
 	list, err := lister()
 	s.priceMu.Lock()
 	defer s.priceMu.Unlock()
-	if s.priceGen != gen {
+	if s.priceGen.Load() != gen {
 		// The price source was reconfigured while this fetch was in flight:
 		// discard the stale result instead of resurrecting the old table.
 		if s.priceWait == wait {
@@ -708,7 +719,8 @@ func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
 // UpdateKey applies mutate to a copy of the key identified by id while holding
 // the store update lock. Doing the read-modify-write under that lock means two
 // concurrent PATCHes of different fields cannot lose each other's changes.
-// Lookup is case-insensitive, matching findByID.
+// Lookup is exact: ids that differ only by case are distinct policies, so a
+// case-folded fallback could silently mutate the wrong one.
 func (s *Store) UpdateKey(id string, mutate func(*KeyConfig) error) (KeyConfig, error) {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
@@ -718,14 +730,6 @@ func (s *Store) UpdateKey(id string, mutate func(*KeyConfig) error) (KeyConfig, 
 	}
 	s.mu.RLock()
 	current := s.keys[id]
-	if current == nil {
-		for candidateID, candidate := range s.keys {
-			if strings.EqualFold(candidateID, id) {
-				current = candidate
-				break
-			}
-		}
-	}
 	var work KeyConfig
 	if current != nil {
 		work = *current

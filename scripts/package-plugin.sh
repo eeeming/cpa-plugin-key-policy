@@ -12,8 +12,12 @@ rm -f "${lib_dir}/${plugin_id}.h"
 if [[ "${RUNNER_OS:-}" == "Windows" ]]; then
 	powershell -NoProfile -Command "Compress-Archive -Path '${lib_dir}/${lib_name}' -DestinationPath '${archive_name}'"
 	# Write the checksum as plain ASCII: Windows PowerShell 5.1 redirection can
-	# emit UTF-16, which breaks the release job's checksum validation.
+	# emit UTF-16, which breaks the release job's checksum validation. Command
+	# substitution strips the trailing newline but NOT the CR PowerShell emits,
+	# so strip CR/LF explicitly or the release awk gate sees "<hash>\r".
 	hash="$(powershell -NoProfile -Command "(Get-FileHash -Algorithm SHA256 '${archive_name}').Hash.ToLower()")"
+	hash="${hash//$'\r'/}"
+	hash="${hash//$'\n'/}"
 	printf '%s  %s\n' "${hash}" "${archive_name}" > "${archive_name}.sha256"
 else
 	(

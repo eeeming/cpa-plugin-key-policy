@@ -2,9 +2,11 @@ package policy
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -185,5 +187,53 @@ func TestCPAMPPricesUnsetTierFieldsStayZero(t *testing.T) {
 	// And the payload must still parse without error (unset = 0, not rejected).
 	if _, err := json.Marshal(got); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The cold-start wait must outlast the lister's worst case: the CPAMP request
+// plus the Home/Plus fallback after a 404. If it were shorter, a waiter would
+// give up while the fetch was still running and Admit would skip the USD gate.
+func TestPriceFetchWaitCoversFallbackFetch(t *testing.T) {
+	if priceFetchWait < 2*priceHTTPTimeout {
+		t.Fatalf("priceFetchWait=%v must cover two price requests (%v)", priceFetchWait, 2*priceHTTPTimeout)
+	}
+}
+
+// Hammer the price source swap while fetches are in flight. The generation is
+// captured together with the lister under s.mu, so no old table may be
+// committed under a new generation; the final source must win.
+func TestConcurrentReconfigureAndFetchConverges(t *testing.T) {
+	store := configureQuotaStore(t)
+	const n = 30
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(2)
+		go func(i int) {
+			defer wg.Done()
+			store.SetPriceLister(func() ([]ModelPrice, error) {
+				return []ModelPrice{{
+					Model:                fmt.Sprintf("m%d", i),
+					ServiceTier:          "*",
+					InputPricePerMillion: float64(i + 1),
+					Enabled:              true,
+				}}, nil
+			})
+		}(i)
+		go func() {
+			defer wg.Done()
+			_ = store.PricesAvailable()
+		}()
+	}
+	wg.Wait()
+
+	store.SetPriceLister(func() ([]ModelPrice, error) {
+		return []ModelPrice{{Model: "final", ServiceTier: "*", InputPricePerMillion: 42, Enabled: true}}, nil
+	})
+	if !store.PricesAvailable() {
+		t.Fatal("expected prices from the final source")
+	}
+	prices, ok := store.cachedPrices()
+	if !ok || len(prices) != 1 || prices[0].Model != "final" || prices[0].InputPricePerMillion != 42 {
+		t.Fatalf("cache did not converge on the final source: %+v", prices)
 	}
 }

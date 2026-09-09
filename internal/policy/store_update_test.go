@@ -71,6 +71,40 @@ func TestUpdateKeyUnknownID(t *testing.T) {
 	}
 }
 
+// Ids that differ only by case are distinct policies, so a case-folded lookup
+// could mutate the wrong one. UpdateKey must require an exact id.
+func TestUpdateKeyRejectsCaseVariantID(t *testing.T) {
+	store := configureQuotaStore(t)
+	bindTestKey(t, store, "foo", "sk-foo", 1, 0)
+	bindTestKey(t, store, "FOO", "sk-FOO", 2, 0)
+
+	if _, err := store.UpdateKey("FoO", func(key *KeyConfig) error {
+		key.RPM = 999
+		return nil
+	}); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("case-variant id err = %v, want ErrUnknownKey", err)
+	}
+	for _, id := range []string{"foo", "FOO"} {
+		got, _, ok := store.ModelUsageFor(id)
+		if !ok {
+			t.Fatalf("key %q missing", id)
+		}
+		if got.RPM == 999 {
+			t.Fatalf("key %q was mutated by a case-variant id", id)
+		}
+	}
+	if _, err := store.UpdateKey("foo", func(key *KeyConfig) error {
+		key.RPM = 7
+		return nil
+	}); err != nil {
+		t.Fatalf("exact id update failed: %v", err)
+	}
+	got, _, _ := store.ModelUsageFor("foo")
+	if got.RPM != 7 {
+		t.Fatalf("exact id update lost: %+v", got)
+	}
+}
+
 // UpdateKey keeps the stored secret when the update carries no new plaintext,
 // and rejects rebinding a hash owned by another policy.
 func TestUpdateKeyKeepsSecretAndRejectsDuplicateHash(t *testing.T) {
