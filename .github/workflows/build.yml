@@ -198,7 +198,10 @@ jobs:
   # the only tests that prove the .so loads and enforces quota in a real host.
   # Run them on tags and manual dispatch; they do not gate `release`.
   e2e:
-    name: E2E (${{ matrix.stack }})
+    # Static name: GitHub appends the matrix value in the UI ("E2E (docker)" /
+    # "E2E (plus)"). Putting ${{ matrix.stack }} in the name leaks the raw
+    # template into the checks list when the job is skipped.
+    name: E2E
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 40
