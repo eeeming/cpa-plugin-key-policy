@@ -288,6 +288,7 @@ th.num, td.num { text-align: right; }
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
     gap: 16px;
+    align-items: start;
   }
 }
 
@@ -297,6 +298,8 @@ th.num, td.num { text-align: right; }
   column-gap: 8px;
   row-gap: 6px;
   align-items: center;
+  align-self: start;
+  height: max-content;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--r-md);
