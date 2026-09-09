@@ -318,48 +318,42 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 	if id == "" {
 		return jsonError(http.StatusBadRequest, "missing_id", "id is required")
 	}
-	keys := a.store.Keys()
-	var current *policy.KeyConfig
-	for i := range keys {
-		if keys[i].ID == id {
-			copy := keys[i]
-			current = &copy
-			break
+	updated, err := a.store.UpdateKey(id, func(current *policy.KeyConfig) error {
+		if req.Name != nil {
+			current.Name = strings.TrimSpace(*req.Name)
 		}
-	}
-	if current == nil {
-		return jsonError(http.StatusNotFound, "not_found", "key not found")
-	}
-	if req.Name != nil {
-		current.Name = strings.TrimSpace(*req.Name)
-	}
-	if req.Enabled != nil {
-		current.Enabled = *req.Enabled
-	}
-	if req.RPM != nil {
-		current.RPM = *req.RPM
-	}
-	if req.DailyLimitUSD != nil {
-		current.DailyLimitUSD = *req.DailyLimitUSD
-	}
-	if req.WeeklyLimitUSD != nil {
-		current.WeeklyLimitUSD = *req.WeeklyLimitUSD
-	}
-	plain := strings.TrimSpace(req.Key)
-	if plain != "" {
-		hash, err := policy.HashKey(plain)
-		if err != nil {
-			return jsonError(http.StatusBadRequest, "invalid_key", err.Error())
+		if req.Enabled != nil {
+			current.Enabled = *req.Enabled
 		}
-		current.KeyHash = hash
-		current.KeyPreview = policy.PreviewKey(plain)
-		current.CallerScope = policy.CallerScope(plain)
-		current.Name = nameWithoutPlaintext(current.Name, plain)
-	}
-	if err := a.store.UpsertKey(*current, true); err != nil {
+		if req.RPM != nil {
+			current.RPM = *req.RPM
+		}
+		if req.DailyLimitUSD != nil {
+			current.DailyLimitUSD = *req.DailyLimitUSD
+		}
+		if req.WeeklyLimitUSD != nil {
+			current.WeeklyLimitUSD = *req.WeeklyLimitUSD
+		}
+		plain := strings.TrimSpace(req.Key)
+		if plain != "" {
+			hash, err := policy.HashKey(plain)
+			if err != nil {
+				return err
+			}
+			current.KeyHash = hash
+			current.KeyPreview = policy.PreviewKey(plain)
+			current.CallerScope = policy.CallerScope(plain)
+			current.Name = nameWithoutPlaintext(current.Name, plain)
+		}
+		return nil
+	})
+	if err != nil {
+		if errors.Is(err, policy.ErrUnknownKey) {
+			return jsonError(http.StatusNotFound, "not_found", "key not found")
+		}
 		return jsonError(http.StatusBadRequest, "invalid_policy", err.Error())
 	}
-	return jsonResponse(http.StatusOK, map[string]any{"key": a.publicKeyFromConfig(*current)})
+	return jsonResponse(http.StatusOK, map[string]any{"key": a.publicKeyFromConfig(updated)})
 }
 
 func (a *App) resetWindows(body []byte) ManagementResponse {

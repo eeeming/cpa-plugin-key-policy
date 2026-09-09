@@ -14,7 +14,8 @@
     "submit": "登录",
     "loginFailed": "登录失败",
     "memoryNote": "key 僅存在記憶體中，关闭/刷新页面即失效，不會寫入本地儲存。",
-    "embeddedFallback": "未从面板读取到已保存的 management key（可能未勾选“记住密码”），请手动输入。"
+    "embeddedFallback": "未从面板读取到已保存的 management key（可能未勾选“记住密码”），请手动输入。",
+    "insecureBase": "警告：目前是 http 明文位址，management key 會以明文傳輸。請改用 https 或本機回環位址。"
   },
   "session": {
     "restoring": "正在从面板恢复会话…"
@@ -42,6 +43,7 @@
     "selectAll": "全選",
     "invert": "反選",
     "selectedCount": "已選 {{count}}",
+    "selectOne": "選擇 {{name}}",
     "setLimits": "設置限額",
     "setLimitsTitle": "為所選 Key 設置限額",
     "setLimitsDone": "已更新 {{count}} 把 Key 的限額。",
@@ -56,13 +58,16 @@
     "bulkUnbindConfirm": "解綁所選 {{count}} 把 Key？Plus api-keys 不會被刪除。",
     "bulkUnbindDone": "已解綁 {{count}} 把。",
     "bulkFailed": "部分失敗：{{detail}}",
-    "invalidLimits": "限額須為非負數，空表示不限。"
+    "invalidLimits": "限額須為非負數，空表示不限。",
+    "setLimitsHint": "留空的項目保持不變；填 0 表示不限。",
+    "nothingToUpdate": "請至少填寫一項限額。"
   },
   "bind": {
     "title": "绑定已有 Key",
     "name": "名称",
     "key": "现有 Key 明文",
     "keyHint": "只用来计算哈希。磁盘和列表里只保留 sha256 与 preview，不会保存明文。",
+    "keyRequired": "請填寫現有 Key 明文",
     "keyRotate": "更换 Key 明文（可选）",
     "keyRotateHint": "留空则继续用当前绑定。填写新明文会重新哈希，明文不会落盘，列表只显示 preview。",
     "daily": "日限額 USD（空=不限，滾動 24 小時）",

@@ -60,7 +60,9 @@ export async function fetchKeyUsage(id: string): Promise<KeyUsageResponse> {
 export function quotaStatus(k: KeyPublic): "ok" | "daily" | "weekly" | "disabled" {
   if (!k.enabled) return "disabled";
   const u = k.usage;
-  if (u.weekly_limit_usd > 0 && u.weekly_usd >= u.weekly_limit_usd) return "weekly";
+  // Daily first: the backend checks daily before weekly (usage.go OverLimit),
+  // so the badge names the same cap that produces the 429 message.
   if (u.daily_limit_usd > 0 && u.daily_usd >= u.daily_limit_usd) return "daily";
+  if (u.weekly_limit_usd > 0 && u.weekly_usd >= u.weekly_limit_usd) return "weekly";
   return "ok";
 }

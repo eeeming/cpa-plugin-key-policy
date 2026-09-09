@@ -239,5 +239,14 @@ func atomicWriteStateFile(path string, raw []byte) error {
 	if err := temp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tempName, path)
+	if err := os.Rename(tempName, path); err != nil {
+		return err
+	}
+	// Best effort: fsync the directory so the rename itself survives a crash.
+	// Opening a directory fails on some platforms (e.g. Windows); ignore that.
+	if d, err := os.Open(dir); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }

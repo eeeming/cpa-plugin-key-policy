@@ -30,4 +30,16 @@ describe("quotaStatus", () => {
     expect(quotaStatus(key({ usage: { daily_usd: 0, weekly_usd: 10, daily_limit_usd: 1, weekly_limit_usd: 10 } }))).toBe("weekly");
     expect(quotaStatus(key())).toBe("ok");
   });
+
+  it("names the daily cap when both are over, matching backend order", () => {
+    expect(
+      quotaStatus(key({ usage: { daily_usd: 2, weekly_usd: 20, daily_limit_usd: 1, weekly_limit_usd: 10 } })),
+    ).toBe("daily");
+  });
+
+  it("ignores limits of 0 (unlimited)", () => {
+    expect(
+      quotaStatus(key({ usage: { daily_usd: 99, weekly_usd: 99, daily_limit_usd: 0, weekly_limit_usd: 0 } })),
+    ).toBe("ok");
+  });
 });

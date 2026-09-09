@@ -14,7 +14,8 @@
     "submit": "Sign in",
     "loginFailed": "Sign-in failed",
     "memoryNote": "The key stays in memory only and is cleared on refresh.",
-    "embeddedFallback": "Could not reuse the panel management key. Enter it manually."
+    "embeddedFallback": "Could not reuse the panel management key. Enter it manually.",
+    "insecureBase": "Warning: this is a plain http address, so the management key is sent unencrypted. Use https or a loopback address."
   },
   "session": {
     "restoring": "Restoring session from the panel…"
@@ -42,6 +43,7 @@
     "selectAll": "Select all",
     "invert": "Invert",
     "selectedCount": "{{count}} selected",
+    "selectOne": "Select {{name}}",
     "setLimits": "Set limits",
     "setLimitsTitle": "Set limits for selected keys",
     "setLimitsDone": "Updated limits on {{count}} keys.",
@@ -56,13 +58,16 @@
     "bulkUnbindConfirm": "Unbind {{count}} selected keys? Plus api-keys are not deleted.",
     "bulkUnbindDone": "Unbound {{count}} keys.",
     "bulkFailed": "Some keys failed: {{detail}}",
-    "invalidLimits": "Limits must be non-negative numbers. Leave empty for unlimited."
+    "invalidLimits": "Limits must be non-negative numbers. Leave empty for unlimited.",
+    "setLimitsHint": "Leave a field empty to keep it unchanged; enter 0 for unlimited.",
+    "nothingToUpdate": "Enter at least one limit to change."
   },
   "bind": {
     "title": "Bind existing key",
     "name": "Name",
     "key": "Existing key plaintext",
     "keyHint": "Used only to compute a hash. Disk and list keep sha256 + preview, never the secret.",
+    "keyRequired": "Existing key plaintext is required",
     "keyRotate": "Replace key plaintext (optional)",
     "keyRotateHint": "Leave blank to keep the current binding. A new value is hashed immediately and is not stored.",
     "daily": "Daily USD (empty = unlimited, rolling 24h)",

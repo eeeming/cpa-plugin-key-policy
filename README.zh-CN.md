@@ -144,6 +144,8 @@ Content-Type: application/json
 
 停用（`enabled: false`）只暂停限额，Plus 侧 Key 仍可用。解绑只删插件策略。从 Plus `api-keys` 删掉才会 401。
 
+**查看与重置**：`GET /v0/management/plugins/cpa-key-quota/keys/usage?id=<id>` 返回单个 Key 的 24h/7d 金额、请求数、窗口开始/重置时间，以及卡片里展示的按模型明细。`POST /v0/management/plugins/cpa-key-quota/keys/reset-windows` 传 `{"ids":["k-a","k-b"]}`，把这几个 Key 的滚动 24h/7d 用量和 RPM 分钟桶清零；限额数值、名称、启用状态都不变，Plus 侧用量也不动。未知 id 会出现在 `failed` 里。
+
 ## 滚动窗口
 
 日/周 USD 都是**滚动窗口**，不是自然日/自然周：
@@ -191,8 +193,9 @@ HTTP **429**，OpenAI 形状的 `error`：
 ## 测试
 
 ```bash
-go test ./internal/policy/ ./internal/plugin/
-cd web && npm test
+make test-all                  # Go 测试 + 前端测试（npm ci && npm test）
+go test -race ./...            # CI 里的 Go 测试
+cd web && npm run typecheck    # tsc --noEmit
 ```
 
 Docker：`make e2e-docker`（Home 价表）、`make e2e-plus`（CPA-Manager-Plus）。说明见 [e2e/README.md](e2e/README.md)。

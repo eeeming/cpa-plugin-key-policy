@@ -1,3 +1,5 @@
+# Template for the manual gomami tunnel stack. Copy it to config.yaml (the path
+# gomami-compose.yml mounts) and fill in the real Plus admin key before use.
 host: ""
 port: 8317
 debug: true
@@ -30,7 +32,9 @@ plugins:
       priority: 10
       state_file: "/CLIProxyAPI/data/cpa-key-quota-state.json"
       plus_base_url: "http://cpa-manager-plus:18317"
-      plus_management_key: "e2e-admin-key"
+      # Must equal CPA_MANAGER_ADMIN_KEY passed to the plus service in
+      # gomami-compose.yml, otherwise price/sync calls return 401.
+      plus_management_key: "replace-with-manager-plus-admin-key"
 
 openai-compatibility:
   - name: "mock"

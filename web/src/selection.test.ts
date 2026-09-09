@@ -7,6 +7,7 @@ import {
   rectsIntersect,
   idsHitByMarquee,
   mergeSelection,
+  pruneSelection,
 } from "./selection";
 import zh from "./i18n/locales/zh-CN.json";
 import en from "./i18n/locales/en.json";
@@ -20,6 +21,10 @@ describe("toggleId / selectAll / invertSelection", () => {
 
   it("select-all copies the current list of ids", () => {
     expect(selectAll(["a", "b", "c"])).toEqual(["a", "b", "c"]);
+    const src = ["a"];
+    const out = selectAll(src);
+    out.push("b");
+    expect(src).toEqual(["a"]);
   });
 
   it("invert-selection keeps ids that were not selected", () => {
@@ -29,6 +34,18 @@ describe("toggleId / selectAll / invertSelection", () => {
 
   it("merges marquee hits into the existing selection without duplicates", () => {
     expect(mergeSelection(["a"], ["a", "b"])).toEqual(["a", "b"]);
+  });
+
+  it("prunes ids that no longer exist after a reload", () => {
+    expect(pruneSelection(["a", "b", "c"], ["b", "c"])).toEqual(["b", "c"]);
+    expect(pruneSelection(["ghost"], ["a"])).toEqual([]);
+  });
+
+  it("keeps the same reference when nothing was pruned", () => {
+    const cur = ["a"];
+    expect(pruneSelection(cur, ["a", "b"])).toBe(cur);
+    const empty: string[] = [];
+    expect(pruneSelection(empty, [])).toBe(empty);
   });
 });
 

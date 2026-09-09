@@ -7,7 +7,9 @@ make e2e-plus     # CPA + CPA-Manager-Plus (the price source operators should ru
 make e2e-docker   # CPA + Home billing/model-prices (404-fallback)
 ```
 
-Images: `eceasy/cli-proxy-api` (plugin host) + `seakee/cpa-manager-plus` (`e2e-plus`) or `eceasy/cli-proxy-api-home` (`e2e-docker`). The community `cli-proxy-api-plus` image is private and is not pulled.
+Images: `eceasy/cli-proxy-api` (plugin host) + `seakee/cpa-manager-plus` (`e2e-plus`) or `eceasy/cli-proxy-api-home` (`e2e-docker`). The community `cli-proxy-api-plus` image is not used by these stacks.
+
+Published ports are bound to `127.0.0.1` only, each stack runs under `E2E_TIMEOUT` (default 900s), and an `EXIT` trap removes its containers and volumes even when a step fails early. The e2e `.so` is built from a fresh frontend build, so it never embeds a stale committed UI. CI runs both stacks on tags and manual dispatch; they do not gate the release job.
 
 How to build and install the `.so` on a real CPA host is in the root [README.md](../README.md#deploy) / [README.zh-CN.md](../README.zh-CN.md#部署).
 

@@ -10,6 +10,7 @@ import {
 
 afterEach(() => {
   _resetLocale("zh-CN");
+  document.documentElement.lang = "zh-CN";
 });
 
 describe("translate", () => {
@@ -25,7 +26,7 @@ describe("translate", () => {
     setLocale("en");
     expect(translate("keys.refresh")).toBe("Refresh");
     setLocale("ru");
-    expect(translate("keys.refresh")).toBe("Refresh");
+    expect(translate("keys.refresh")).toBe("Обновить");
   });
 
   it("interpolates {{name}} placeholders", () => {
@@ -106,5 +107,22 @@ describe("locale store", () => {
     expect(isSupportedLocale("ru")).toBe(true);
     expect(isSupportedLocale("ja")).toBe(false);
     expect(isSupportedLocale("")).toBe(false);
+  });
+});
+
+describe("document language", () => {
+  it("mirrors the active locale onto <html lang>", () => {
+    _resetLocale("zh-CN");
+    setLocale("en");
+    expect(document.documentElement.lang).toBe("en");
+    setLocale("ru");
+    expect(document.documentElement.lang).toBe("ru");
+  });
+
+  it("leaves <html lang> alone when the locale is unchanged", () => {
+    _resetLocale("zh-CN");
+    document.documentElement.lang = "zh-CN";
+    setLocale("zh-CN");
+    expect(document.documentElement.lang).toBe("zh-CN");
   });
 });

@@ -33,3 +33,12 @@ export function mergeSelection(current: string[], added: string[]): string[] {
   for (const id of added) set.add(id);
   return [...set];
 }
+
+// Drop selected ids that no longer exist, so a reload cannot leave the bulk
+// toolbar acting on ghosts (which would fail every request with 404).
+export function pruneSelection(selected: string[], ids: string[]): string[] {
+  if (selected.length === 0) return selected;
+  const live = new Set(ids);
+  const next = selected.filter((id) => live.has(id));
+  return next.length === selected.length ? selected : next;
+}

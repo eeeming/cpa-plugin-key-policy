@@ -1,3 +1,12 @@
+# Build the management UI first so the e2e .so never embeds a stale committed
+# bundle (README's Docker cross-compile path uses this same Dockerfile).
+FROM node:20-bookworm-slim AS web
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+RUN VITE_HOSTED=1 npm run build
+
 FROM golang:1.23-bookworm AS build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc libc6-dev \
@@ -7,6 +16,7 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
+COPY --from=web /web/dist/index.html ./internal/plugin/web/dist/index.html
 RUN CGO_ENABLED=1 go build -buildvcs=false -tags cshared -buildmode=c-shared \
     -o /cpa-key-quota.so ./cmd/cpa-key-policy
 

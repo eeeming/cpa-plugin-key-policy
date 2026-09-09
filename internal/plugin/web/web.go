@@ -3,8 +3,8 @@
 // /v0/resource/plugins/cpa-key-quota/index.html.
 //
 // dist/index.html is a build artifact produced by `npm run build` in ../../web.
-// A placeholder is committed so the Go build never fails when the frontend has
-// not been built yet; the real UI replaces it after a frontend build.
+// The committed copy is the real bundle (rebuilt by `make web-build` and CI), so
+// a plain `go build` embeds the shipped UI without needing the frontend toolchain.
 package web
 
 import (

@@ -32,6 +32,10 @@ type Store struct {
 	pricesReady     bool
 	priceFetchedAt  time.Time
 	priceRefreshing bool
+	// priceGen increments whenever the price source is replaced. An in-flight
+	// fetch captures it and discards its result if the source changed, so a
+	// reconfigure cannot resurrect the previous table.
+	priceGen uint64
 }
 
 type AdmitDecision struct {
@@ -68,10 +72,19 @@ func (s *Store) SetPriceLister(fn PriceLister) {
 	s.mu.Lock()
 	s.listPrices = fn
 	s.mu.Unlock()
+	s.resetPriceCache()
+}
+
+// resetPriceCache drops the cached table and invalidates any in-flight fetch.
+// It is called whenever the price source changes so the next Admit re-syncs the
+// latest table from the currently configured source.
+func (s *Store) resetPriceCache() {
 	s.priceMu.Lock()
+	s.priceGen++
 	s.priceCache = nil
 	s.pricesReady = false
 	s.priceFetchedAt = time.Time{}
+	s.priceRefreshing = false
 	s.priceMu.Unlock()
 }
 
@@ -143,10 +156,16 @@ func (s *Store) Configure(cfg Config) error {
 		s.listPrices = HTTPPriceLister(nil, cfg.PlusBaseURL, cfg.PlusManagementKey)
 		s.listAPIKeys = HTTPAPIKeyLister(nil, cfg.PlusBaseURL, cfg.PlusManagementKey)
 	} else {
+		// An empty plus_base_url means "RPM only": drop the price source so a
+		// reconfigure cannot keep billing from a previously configured Plus.
+		s.listPrices = nil
 		s.listAPIKeys = nil
 	}
 
 	s.mu.Unlock()
+	// A (re)configure always re-syncs the latest price table from the source
+	// above, and discards any table fetched from a previous source.
+	s.resetPriceCache()
 	if firstBoot {
 		if errSave := s.persistCurrentState(); errSave != nil {
 			return fmt.Errorf("seed state: %w", errSave)
@@ -243,12 +262,18 @@ func (s *Store) refreshPrices(force bool) {
 		return
 	}
 	s.priceRefreshing = true
+	gen := s.priceGen
 	s.priceMu.Unlock()
 	list, err := lister()
 	s.priceMu.Lock()
+	defer s.priceMu.Unlock()
+	if s.priceGen != gen {
+		// The price source was reconfigured while this fetch was in flight:
+		// discard the stale result instead of resurrecting the old table.
+		return
+	}
 	s.priceRefreshing = false
 	s.priceFetchedAt = time.Now()
-	defer s.priceMu.Unlock()
 	if err != nil {
 		// Keep the last good table so USD limits do not fail open.
 		// Stamp priceFetchedAt so Admit does not retry Plus on every request.
@@ -571,16 +596,7 @@ func (s *Store) SyncFromPlus() (SyncResult, error) {
 			out.Skipped++
 			continue
 		}
-		id := "k-" + strings.TrimPrefix(hash, HashPrefix)
-		if len(id) > 14 {
-			id = id[:14]
-		}
-		if s.findByID(id) != nil {
-			id = "k-" + strings.TrimPrefix(hash, HashPrefix)
-			if len(id) > 18 {
-				id = id[:18]
-			}
-		}
+		id := s.availableKeyID(hash)
 		name := strings.TrimSpace(item.Name)
 		if name == "" || name == plain || strings.Contains(name, plain) {
 			name = PreviewKey(plain)
@@ -606,19 +622,25 @@ func (s *Store) SyncFromPlus() (SyncResult, error) {
 	return out, nil
 }
 
-func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
-	s.updateMu.Lock()
-	defer s.updateMu.Unlock()
-	cfg := Config{Enabled: true, StateFile: s.StatePath(), Keys: []KeyConfig{input}}
+// normalizeKey validates and canonicalizes one key policy the same way a
+// config or state file entry is normalized.
+func normalizeKey(input KeyConfig) (KeyConfig, error) {
+	cfg := Config{Enabled: true, StateFile: DefaultConfig().StateFile, Keys: []KeyConfig{input}}
 	if err := normalizeConfig(&cfg); err != nil {
-		return err
+		return KeyConfig{}, err
 	}
-	key := cfg.Keys[0]
+	return cfg.Keys[0], nil
+}
+
+// applyKeyLocked writes one already-normalized key into the map, enforcing the
+// unique-hash invariant and preserving immutable fields (created/last-access
+// timestamps, and the stored secret when the update carries no new hash).
+func (s *Store) applyKeyLocked(key KeyConfig) error {
 	now := time.Now().UTC()
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if hash := strings.ToLower(strings.TrimSpace(key.KeyHash)); hash != "" {
 		if existing := s.keysByHash[hash]; existing != nil && existing.ID != key.ID {
-			s.mu.Unlock()
 			return fmt.Errorf("key hash already bound to %q", existing.ID)
 		}
 	}
@@ -638,11 +660,99 @@ func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
 	key.UpdatedAt = now
 	s.keys[key.ID] = &key
 	s.rebuildIndexesLocked()
-	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) UpsertKey(input KeyConfig, persist bool) error {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	key, err := normalizeKey(input)
+	if err != nil {
+		return err
+	}
+	if err := s.applyKeyLocked(key); err != nil {
+		return err
+	}
 	if persist {
 		return s.persistCurrentState()
 	}
 	return nil
+}
+
+// UpdateKey applies mutate to a copy of the key identified by id while holding
+// the store update lock. Doing the read-modify-write under that lock means two
+// concurrent PATCHes of different fields cannot lose each other's changes.
+// Lookup is case-insensitive, matching findByID.
+func (s *Store) UpdateKey(id string, mutate func(*KeyConfig) error) (KeyConfig, error) {
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return KeyConfig{}, errors.New("id is required")
+	}
+	s.mu.RLock()
+	current := s.keys[id]
+	if current == nil {
+		for candidateID, candidate := range s.keys {
+			if strings.EqualFold(candidateID, id) {
+				current = candidate
+				break
+			}
+		}
+	}
+	var work KeyConfig
+	if current != nil {
+		work = *current
+	}
+	s.mu.RUnlock()
+	if current == nil {
+		return KeyConfig{}, ErrUnknownKey
+	}
+	if mutate != nil {
+		if err := mutate(&work); err != nil {
+			return KeyConfig{}, err
+		}
+	}
+	key, err := normalizeKey(work)
+	if err != nil {
+		return KeyConfig{}, err
+	}
+	if err := s.applyKeyLocked(key); err != nil {
+		return KeyConfig{}, err
+	}
+	if err := s.persistCurrentState(); err != nil {
+		return key, err
+	}
+	return key, nil
+}
+
+// availableKeyID derives a short, readable id from a key hash and guarantees it
+// is not already bound. It lengthens the hash prefix first, then falls back to a
+// numeric suffix, so a sync can never silently overwrite an existing policy.
+func (s *Store) availableKeyID(hash string) string {
+	body := strings.TrimPrefix(hash, HashPrefix)
+	candidates := []int{14, 18, 0}
+	for _, n := range candidates {
+		id := "k-" + body
+		if n > 0 && len(id) > n {
+			id = id[:n]
+		}
+		if s.findByID(id) == nil {
+			return id
+		}
+	}
+	base := "k-" + body
+	for i := 2; ; i++ {
+		suffix := fmt.Sprintf("-%d", i)
+		id := base
+		if len(id) > 24-len(suffix) {
+			id = id[:24-len(suffix)]
+		}
+		id += suffix
+		if s.findByID(id) == nil {
+			return id
+		}
+	}
 }
 
 func (s *Store) DeleteKey(id string) error {

@@ -1,6 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import type { AliasUsageRow, KeyPublic } from "../types";
 import { fetchKeyUsage, quotaStatus } from "../api/keys";
+import { errText } from "../api/error";
 import { useT } from "../i18n";
 import QuotaMeter from "./QuotaMeter";
 import { formatUsd } from "../quota";
@@ -27,19 +28,23 @@ export default function KeyCard({
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<AliasUsageRow[] | null>(null);
   const [modelErr, setModelErr] = useState("");
+  // Guards against a slow earlier response overwriting a newer one when the
+  // operator rapidly hides and re-shows the per-model panel.
+  const reqSeq = useRef(0);
 
   const toggleModels = async () => {
     if (open) {
       setOpen(false);
       return;
     }
+    const seq = ++reqSeq.current;
     setOpen(true);
     setModelErr("");
     try {
       const detail = await fetchKeyUsage(k.id);
-      setModels(detail.models ?? []);
+      if (seq === reqSeq.current) setModels(detail.models ?? []);
     } catch (e) {
-      setModelErr((e as Error).message ?? t("keys.loadFailed"));
+      if (seq === reqSeq.current) setModelErr(errText(e, t("keys.loadFailed")));
     }
   };
 
@@ -53,7 +58,7 @@ export default function KeyCard({
           type="checkbox"
           checked={!!selected}
           onChange={() => onToggleSelect?.()}
-          aria-label={k.name}
+          aria-label={t("keys.selectOne", { name: k.name })}
         />
         <span className="kc-check-box" aria-hidden="true" />
       </label>
