@@ -36,10 +36,12 @@ func TestQuotaPipelineFromCPAMPPrices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _ = app.HandleMethod(MethodUsageHandle, mustJSON(UsageHandleRequest{
+	if _, err := app.HandleMethod(MethodUsageHandle, mustJSON(UsageHandleRequest{
 		APIKey: plain, Model: "gpt-4.1-mini", Provider: "openai-compatible",
 		Detail: UsageDetail{InputTokens: 1000},
-	}))
+	})); err != nil {
+		t.Fatal(err)
+	}
 	over := interceptBearer(t, app, plain)
 	if !over.Terminate || over.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("over-limit: %+v", over)

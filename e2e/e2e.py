@@ -12,6 +12,7 @@ import urllib.request
 
 CPA = os.environ.get("CPA_URL", "http://cpa:8317").rstrip("/")
 HOME = os.environ.get("HOME_URL", "http://home:8327").rstrip("/")
+MOCK = os.environ.get("MOCK_URL", "http://mock:8080").rstrip("/")
 MGMT = os.environ.get("MGMT_KEY", "e2e-mgmt-key")
 PLUGIN = "cpa-key-quota"
 MODEL = "gpt-4.1-mini"
@@ -114,6 +115,16 @@ def wait_daily(key_id: str, minimum: float, timeout: float = 20) -> float:
     return got
 
 
+def mock_chat_calls() -> int:
+    """Upstream call counter from the mock LLM, used to prove a 429 never
+    reached the provider."""
+    status, payload, _ = http("GET", MOCK + "/healthz")
+    if status != 200 or not isinstance(payload, dict):
+        fail(f"mock healthz HTTP {status} {payload}")
+        return -1
+    return int(payload.get("chat_calls") or 0)
+
+
 def bind(key_id: str, plain: str, **limits):
     body = {"id": key_id, "name": key_id, "key": plain, **limits}
     status, payload, raw = mgmt("POST", f"/v0/management/plugins/{PLUGIN}/keys", body)
@@ -188,6 +199,8 @@ def main() -> int:
     else:
         ok(f"second request billed daily_usd={daily}")
 
+    # The 429 must be produced by the plugin BEFORE the request reaches upstream.
+    upstream_before = mock_chat_calls()
     status, payload, _ = chat(BOUND)
     if status != 429:
         fail(f"over daily cap expected 429, got {status} {payload}")
@@ -197,6 +210,11 @@ def main() -> int:
             fail(f"429 code={code!r}, want insufficient_quota payload={payload}")
         else:
             ok("over-limit returns 429 insufficient_quota")
+    upstream_after = mock_chat_calls()
+    if upstream_before >= 0 and upstream_after != upstream_before:
+        fail(f"over-limit request reached upstream: chat_calls {upstream_before} -> {upstream_after}")
+    elif upstream_before >= 0:
+        ok(f"over-limit did not reach upstream (chat_calls={upstream_after})")
 
     # 3) Unbound still works after a bound key is blocked.
     status, payload, _ = chat(UNBOUND)

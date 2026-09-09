@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { listKeys, bindKey, patchKey, deleteKey, syncPlusKeys, resetWindows } from "../api/keys";
-import type { KeyPublic } from "../types";
+import type { KeyPublic, KeyWriteRequest } from "../types";
+import { errText } from "../api/error";
+import { hasAnyLimit, limitPatch, parseLimits, type LimitInputs } from "../bulk";
 import { useT } from "../i18n";
 import KeyCard from "../components/KeyCard";
 import {
@@ -8,6 +10,7 @@ import {
   idsHitByMarquee,
   mergeSelection,
   normalizeRect,
+  pruneSelection,
   selectAll,
   toggleId,
   type Rect,
@@ -16,6 +19,17 @@ import {
 function usdLabel(v: number, unlimited: string): string {
   if (!v) return unlimited;
   return "$" + v;
+}
+
+// Close a modal on Escape (the overlay click is mouse-only).
+function useEscape(onClose: () => void) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 }
 
 const MARQUEE_MIN = 6;
@@ -35,17 +49,25 @@ export default function Policy() {
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ x: number; y: number; cardId?: string; dragging: boolean; moved: boolean } | null>(null);
+  // Only the newest listKeys() response may update state, so a slow refresh
+  // cannot overwrite a newer one.
+  const loadSeq = useRef(0);
 
   const load = useCallback(async () => {
+    const seq = ++loadSeq.current;
     setLoading(true);
     setError("");
     try {
-      setKeys(await listKeys());
+      const next = await listKeys();
+      if (seq !== loadSeq.current) return;
+      setKeys(next);
+      // Drop selected ids that no longer exist so the bulk toolbar never acts
+      // on ghosts (which would fail every request with 404).
+      setSelected((cur) => pruneSelection(cur, next.map((k) => k.id)));
     } catch (e) {
-      const err = e as { message?: string };
-      setError(err.message ?? t("keys.loadFailed"));
+      if (seq === loadSeq.current) setError(errText(e, t("keys.loadFailed")));
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, [t]);
 
@@ -58,7 +80,7 @@ export default function Policy() {
       await patchKey({ id: k.id, enabled: !k.enabled });
       await load();
     } catch (e) {
-      alert((e as Error).message);
+      setError(errText(e, t("keys.loadFailed")));
     }
   };
 
@@ -69,7 +91,7 @@ export default function Policy() {
       setSelected((cur) => cur.filter((id) => id !== k.id));
       await load();
     } catch (e) {
-      alert((e as Error).message);
+      setError(errText(e, t("keys.loadFailed")));
     }
   };
 
@@ -83,7 +105,7 @@ export default function Policy() {
       setNotice(t("keys.syncDone", { added: got.added, skipped: got.skipped, total: got.total }));
       await load();
     } catch (e) {
-      setError((e as Error).message ?? t("keys.syncFailed"));
+      setError(errText(e, t("keys.syncFailed")));
     } finally {
       setSyncing(false);
     }
@@ -107,20 +129,20 @@ export default function Policy() {
       const result = await work(ids);
       await finishBulk({ ...result, clearSelection: !result.error });
     } catch (e) {
-      await finishBulk({ error: (e as Error).message, clearSelection: false });
+      await finishBulk({ error: errText(e, t("keys.loadFailed")), clearSelection: false });
     } finally {
       setBulkBusy(false);
     }
   };
 
-  const applyBulkLimits = async (daily: number, weekly: number, rpm: number) => {
+  const applyBulkLimits = async (values: LimitInputs) => {
     await runBulk(async (ids) => {
       const failures: string[] = [];
       for (const id of ids) {
         try {
-          await patchKey({ id, daily_limit_usd: daily, weekly_limit_usd: weekly, rpm });
+          await patchKey(limitPatch(id, values));
         } catch (e) {
-          failures.push(id + ": " + (e as Error).message);
+          failures.push(id + ": " + errText(e, t("keys.loadFailed")));
         }
       }
       setShowBulk(false);
@@ -152,7 +174,7 @@ export default function Policy() {
       if (got.failed?.length) setError(t("keys.bulkFailed", { detail: got.failed.join(", ") }));
       else setError("");
     } catch (e) {
-      setError((e as Error).message);
+      setError(errText(e, t("keys.loadFailed")));
     }
   };
 
@@ -166,7 +188,7 @@ export default function Policy() {
         try {
           await patchKey({ id, enabled });
         } catch (e) {
-          failures.push(id + ": " + (e as Error).message);
+          failures.push(id + ": " + errText(e, t("keys.loadFailed")));
         }
       }
       if (failures.length) return { error: t("keys.bulkFailed", { detail: failures.join("; ") }) };
@@ -182,7 +204,7 @@ export default function Policy() {
         try {
           await deleteKey(id);
         } catch (e) {
-          failures.push(id + ": " + (e as Error).message);
+          failures.push(id + ": " + errText(e, t("keys.loadFailed")));
         }
       }
       if (failures.length) return { error: t("keys.bulkFailed", { detail: failures.join("; ") }) };
@@ -282,8 +304,8 @@ export default function Policy() {
         </div>
         <button className="btn sm tb-refresh" onClick={() => void load()}>{t("keys.refresh")}</button>
       </div>
-      {error && <div className="quota-flash err">{error}</div>}
-      {notice && <div className="quota-flash ok">{notice}</div>}
+      {error && <div className="quota-flash err" role="alert">{error}</div>}
+      {notice && <div className="quota-flash ok" role="status" aria-live="polite">{notice}</div>}
       {loading && <div className="muted">{t("keys.loading")}</div>}
       {!loading && keys.length === 0 && <div className="card muted">{t("keys.empty")}</div>}
       <div
@@ -321,8 +343,8 @@ export default function Policy() {
         <BindModal
           title={t("bind.title")}
           onClose={() => setShowBind(false)}
-          onSubmit={async (v) => {
-            await bindKey(v);
+          onSubmit={async (req) => {
+            await bindKey(req);
             setShowBind(false);
             await load();
           }}
@@ -333,8 +355,8 @@ export default function Policy() {
           title={t("keys.edit")}
           existing={edit}
           onClose={() => setEdit(null)}
-          onSubmit={async (v) => {
-            const body = { ...v };
+          onSubmit={async (req) => {
+            const body = { ...req };
             if (!body.key) delete body.key;
             await patchKey(body);
             setEdit(null);
@@ -354,6 +376,47 @@ export default function Policy() {
   );
 }
 
+function LimitFields({
+  idPrefix,
+  daily,
+  weekly,
+  rpm,
+  onDaily,
+  onWeekly,
+  onRpm,
+  hint,
+}: {
+  idPrefix: string;
+  daily: string;
+  weekly: string;
+  rpm: string;
+  onDaily: (v: string) => void;
+  onWeekly: (v: string) => void;
+  onRpm: (v: string) => void;
+  hint?: string;
+}) {
+  const t = useT();
+  return (
+    <>
+      <div className="row2">
+        <div className="form-row">
+          <label htmlFor={idPrefix + "-daily"}>{t("bind.daily")}</label>
+          <input id={idPrefix + "-daily"} className="input" inputMode="decimal" value={daily} onChange={(e) => onDaily(e.target.value)} />
+        </div>
+        <div className="form-row">
+          <label htmlFor={idPrefix + "-weekly"}>{t("bind.weekly")}</label>
+          <input id={idPrefix + "-weekly"} className="input" inputMode="decimal" value={weekly} onChange={(e) => onWeekly(e.target.value)} />
+        </div>
+      </div>
+      <div className="form-row">
+        <label htmlFor={idPrefix + "-rpm"}>{t("bind.rpm")}</label>
+        <input id={idPrefix + "-rpm"} className="input" inputMode="numeric" value={rpm} onChange={(e) => onRpm(e.target.value)} />
+      </div>
+      {hint && <div className="muted" style={{ fontSize: 12 }}>{hint}</div>}
+    </>
+  );
+}
+
 function BulkLimitsModal({
   title,
   count,
@@ -363,54 +426,63 @@ function BulkLimitsModal({
   title: string;
   count: number;
   onClose: () => void;
-  onSubmit: (daily: number, weekly: number, rpm: number) => Promise<void>;
+  onSubmit: (values: LimitInputs) => Promise<void>;
 }) {
   const t = useT();
+  const titleId = useId();
   const [daily, setDaily] = useState("");
   const [weekly, setWeekly] = useState("");
   const [rpm, setRpm] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  useEscape(onClose);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const d = daily.trim() === "" ? 0 : Number(daily);
-    const w = weekly.trim() === "" ? 0 : Number(weekly);
-    const r = rpm.trim() === "" ? 0 : Number(rpm);
-    if ([d, w, r].some((n) => Number.isNaN(n) || n < 0)) {
+    const parsed = parseLimits({ daily, weekly, rpm });
+    if (!parsed.ok) {
       setErr(t("keys.invalidLimits"));
+      return;
+    }
+    const values = parsed.values ?? {};
+    if (!hasAnyLimit(values)) {
+      setErr(t("keys.nothingToUpdate"));
       return;
     }
     if (!confirm(t("keys.selectedCount", { count }) + " — " + t("keys.setLimits"))) return;
     setBusy(true);
+    setErr("");
     try {
-      await onSubmit(d, w, r);
+      await onSubmit(values);
     } catch (ex) {
-      setErr((ex as Error).message);
+      setErr(errText(ex, t("keys.loadFailed")));
       setBusy(false);
     }
   };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => void submit(e)}>
-        <h2>{title}</h2>
+      <form
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => void submit(e)}
+      >
+        <h2 id={titleId}>{title}</h2>
         <div className="muted" style={{ marginBottom: 12 }}>{t("keys.selectedCount", { count })}</div>
-        <div className="row2">
-          <div className="form-row">
-            <label>{t("bind.daily")}</label>
-            <input className="input" value={daily} onChange={(e) => setDaily(e.target.value)} />
-          </div>
-          <div className="form-row">
-            <label>{t("bind.weekly")}</label>
-            <input className="input" value={weekly} onChange={(e) => setWeekly(e.target.value)} />
-          </div>
-        </div>
-        <div className="form-row">
-          <label>{t("bind.rpm")}</label>
-          <input className="input" value={rpm} onChange={(e) => setRpm(e.target.value)} />
-        </div>
-        {err && <div className="muted" style={{ color: "var(--danger)" }}>{err}</div>}
+        <LimitFields
+          idPrefix="bulk"
+          daily={daily}
+          weekly={weekly}
+          rpm={rpm}
+          onDaily={setDaily}
+          onWeekly={setWeekly}
+          onRpm={setRpm}
+          hint={t("keys.setLimitsHint")}
+        />
+        {err && <div className="error" role="alert">{err}</div>}
         <div className="fp-actions" style={{ marginTop: 12 }}>
           <button className="btn" type="button" onClick={onClose}>{t("bind.cancel")}</button>
           <button className="btn primary" type="submit" disabled={busy}>{t("bind.save")}</button>
@@ -429,9 +501,10 @@ function BindModal({
   title: string;
   existing?: KeyPublic;
   onClose: () => void;
-  onSubmit: (v: { id: string; name: string; key?: string; rpm?: number; daily_limit_usd?: number; weekly_limit_usd?: number }) => Promise<void>;
+  onSubmit: (req: KeyWriteRequest) => Promise<void>;
 }) {
   const t = useT();
+  const titleId = useId();
   const [name, setName] = useState(existing?.name ?? "");
   const [key, setKey] = useState("");
   const [daily, setDaily] = useState(existing ? String(existing.daily_limit_usd || "") : "");
@@ -439,27 +512,31 @@ function BindModal({
   const [rpm, setRpm] = useState(existing ? String(existing.rpm || "") : "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  useEscape(onClose);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr("");
     if (!existing && !key.trim()) {
-      setErr(t("login.secretRequired"));
+      setErr(t("bind.keyRequired"));
       return;
     }
+    // The single form's labels read "empty = unlimited", so a blank field is 0
+    // here (not "unchanged"); the fields are pre-filled with the current limits.
+    const parsed = parseLimits({ daily, weekly, rpm }, "zero");
+    if (!parsed.ok) {
+      setErr(t("keys.invalidLimits"));
+      return;
+    }
+    const id = existing?.id || ("k-" + Date.now().toString(36));
+    const req: KeyWriteRequest = { ...limitPatch(id, parsed.values ?? {}), name: name.trim() || id };
+    const plain = key.trim();
+    if (plain) req.key = plain;
     setBusy(true);
     try {
-      const id = existing?.id || ("k-" + Date.now().toString(36));
-      await onSubmit({
-        id,
-        name: name.trim() || id,
-        key: existing ? (key.trim() || undefined) : key.trim(),
-        daily_limit_usd: daily.trim() === "" ? 0 : Number(daily),
-        weekly_limit_usd: weekly.trim() === "" ? 0 : Number(weekly),
-        rpm: rpm.trim() === "" ? 0 : Number(rpm),
-      });
+      await onSubmit(req);
     } catch (ex) {
-      setErr((ex as Error).message);
+      setErr(errText(ex, t("keys.loadFailed")));
     } finally {
       setBusy(false);
     }
@@ -467,20 +544,28 @@ function BindModal({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={(e) => void submit(e)}>
-        <h2>{title}</h2>
+      <form
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={(e) => void submit(e)}
+      >
+        <h2 id={titleId}>{title}</h2>
         {existing && (
           <div className="muted" style={{ marginBottom: 12 }}>
             {t("keys.colDaily")}: {usdLabel(existing.daily_limit_usd, t("keys.unlimited"))}
           </div>
         )}
         <div className="form-row">
-          <label>{t("bind.name")}</label>
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          <label htmlFor="bind-name">{t("bind.name")}</label>
+          <input id="bind-name" className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <div className="form-row">
-          <label>{existing ? t("bind.keyRotate") : t("bind.key")}</label>
+          <label htmlFor="bind-key">{existing ? t("bind.keyRotate") : t("bind.key")}</label>
           <input
+            id="bind-key"
             className="input"
             type="password"
             value={key}
@@ -493,21 +578,16 @@ function BindModal({
             {existing ? t("bind.keyRotateHint") : t("bind.keyHint")}
           </div>
         </div>
-        <div className="row2">
-          <div className="form-row">
-            <label>{t("bind.daily")}</label>
-            <input className="input" value={daily} onChange={(e) => setDaily(e.target.value)} />
-          </div>
-          <div className="form-row">
-            <label>{t("bind.weekly")}</label>
-            <input className="input" value={weekly} onChange={(e) => setWeekly(e.target.value)} />
-          </div>
-        </div>
-        <div className="form-row">
-          <label>{t("bind.rpm")}</label>
-          <input className="input" value={rpm} onChange={(e) => setRpm(e.target.value)} />
-        </div>
-        {err && <div className="muted" style={{ color: "var(--danger)" }}>{err}</div>}
+        <LimitFields
+          idPrefix="bind"
+          daily={daily}
+          weekly={weekly}
+          rpm={rpm}
+          onDaily={setDaily}
+          onWeekly={setWeekly}
+          onRpm={setRpm}
+        />
+        {err && <div className="error" role="alert">{err}</div>}
         <div className="fp-actions" style={{ marginTop: 12 }}>
           <button className="btn" type="button" onClick={onClose}>{t("bind.cancel")}</button>
           <button className="btn primary" type="submit" disabled={busy}>{existing ? t("bind.save") : t("bind.submit")}</button>

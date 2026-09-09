@@ -1,6 +1,13 @@
 import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { isAuthed, subscribe, clearSession, getSession, bootstrapFromPanel } from "./store/session";
+import { useEffect, useRef, useState } from "react";
+import {
+  isAuthed,
+  subscribe,
+  clearSession,
+  getSession,
+  bootstrapFromPanel,
+  disablePanelBootstrap,
+} from "./store/session";
 import { useT } from "./i18n";
 import Login from "./pages/Login";
 import Policy from "./pages/Policy";
@@ -24,7 +31,16 @@ function TopNav() {
           <span className="tn-sub">{s.baseUrl}</span>
         </div>
         <div className="topnav-actions">
-          <button className="btn sm" onClick={() => { clearSession(); nav("/login"); }}>
+          <button
+            className="btn sm"
+            onClick={() => {
+              // Logging out must stay logged out: block the panel-key bootstrap
+              // from restoring the session on the next render.
+              disablePanelBootstrap();
+              clearSession();
+              nav("/login");
+            }}
+          >
             {t("header.logout")}
           </button>
         </div>
@@ -36,16 +52,17 @@ function TopNav() {
 function Shell() {
   const authed = useAuthTick();
   const [bootstrapped, setBootstrapped] = useState(false);
+  const bootstrapStarted = useRef(false);
   const t = useT();
 
   useEffect(() => {
-    if (authed || bootstrapped) return;
-    let alive = true;
-    void bootstrapFromPanel().finally(() => {
-      if (alive) setBootstrapped(true);
-    });
-    return () => { alive = false; };
-  }, [authed, bootstrapped]);
+    // Run the panel-key bootstrap exactly once per page load. Keying this on
+    // `bootstrapped` alone re-ran it after every logout and logged the operator
+    // straight back in when the panel had a remembered key.
+    if (authed || bootstrapStarted.current) return;
+    bootstrapStarted.current = true;
+    void bootstrapFromPanel().finally(() => setBootstrapped(true));
+  }, [authed]);
 
   if (!authed) {
     if (!bootstrapped) {

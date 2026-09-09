@@ -20,7 +20,7 @@ services:
       - home_data:/CLIProxyAPIHome/data
       - home_auths:/CLIProxyAPIHome/auths
     ports:
-      - "18327:8327"
+      - "127.0.0.1:18327:8327"
     expose:
       - "8327"
     healthcheck:
@@ -74,7 +74,7 @@ services:
       - cpa_data:/CLIProxyAPI/data
       - cpa_auths:/CLIProxyAPI/auths
     ports:
-      - "18317:8317"
+      - "127.0.0.1:18317:8317"
     expose:
       - "8317"
 
@@ -90,6 +90,7 @@ services:
     environment:
       CPA_URL: http://cpa:8317
       HOME_URL: http://home:8327
+      MOCK_URL: http://mock:8080
       MGMT_KEY: e2e-mgmt-key
     volumes:
       - ./e2e.py:/app/e2e.py:ro

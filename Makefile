@@ -4,14 +4,22 @@ DIST := dist
 WEB := web
 EMBED_INDEX := internal/plugin/web/dist/index.html
 
-.PHONY: test web-build build-linux-amd64 build-linux-arm64 build-linux clean e2e-docker
+.PHONY: test web-test test-all web-build build-linux-amd64 build-linux-arm64 build-linux clean e2e-docker e2e-plus
 
+# Go tests. Run with -race in CI (see .github/workflows/build.yml).
 test:
 	go test ./...
 
+web-test:
+	cd $(WEB) && npm ci --no-audit --no-fund && npm test
+
+# Everything CI runs on a pull request.
+test-all: test web-test
+
 # Build the single-file web UI and place it where the Go embed expects it.
+# npm ci (not install) so the committed lockfile decides the dependency tree.
 web-build:
-	cd $(WEB) && npm install && VITE_HOSTED=1 npm run build
+	cd $(WEB) && npm ci --no-audit --no-fund && VITE_HOSTED=1 npm run build
 	cp $(WEB)/dist/index.html $(EMBED_INDEX)
 
 build-linux-amd64: web-build
@@ -25,7 +33,7 @@ build-linux-arm64: web-build
 build-linux: build-linux-amd64 build-linux-arm64
 
 clean:
-	rm -rf $(DIST)
+	rm -rf -- $(DIST)
 
 # Full-stack Docker E2E: build linux .so, run CPA + mock Plus/LLM, hit real HTTP paths.
 e2e-docker:

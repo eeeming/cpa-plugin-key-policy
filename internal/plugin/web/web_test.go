@@ -22,9 +22,6 @@ func TestServeIndex(t *testing.T) {
 	if len(body) == 0 {
 		t.Fatal("body is empty")
 	}
-	if string(body[:min(len(body), 15)]) == "" {
-		t.Fatal("body not a string")
-	}
 	// Embedded file should be an HTML document.
 	if !contains(body, "<!doctype html>") && !contains(body, "<!DOCTYPE html>") {
 		t.Fatalf("body does not look like html: %s", string(body[:40]))
@@ -60,11 +57,4 @@ outer:
 		return i
 	}
 	return -1
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

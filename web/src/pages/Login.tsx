@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { setSession, verifySession } from "../store/session";
+import { setSession, verifyCredentials, isInsecureBase } from "../store/session";
 import { isEmbedded } from "../store/panelAuth";
+import { errText } from "../api/error";
 import { useT } from "../i18n";
 
 export default function Login() {
@@ -28,11 +29,13 @@ export default function Login() {
     }
     setBusy(true);
     try {
+      // Verify BEFORE creating the session: setting the session first mounts the
+      // authenticated UI, unmounts this form, and loses the error message.
+      await verifyCredentials(fetch, baseUrl, secretKey);
       setSession(baseUrl, secretKey);
-      await verifySession(fetch);
       nav("/keys");
     } catch (err) {
-      setError((err as Error).message || t("login.loginFailed"));
+      setError(errText(err, t("login.loginFailed")));
     } finally {
       setBusy(false);
     }
@@ -46,18 +49,23 @@ export default function Login() {
       </div>
       <form className="card lp-card" onSubmit={submit}>
         <div className="form-row">
-          <label>{t("login.baseUrl")}</label>
+          <label htmlFor="login-base-url">{t("login.baseUrl")}</label>
           <input
+            id="login-base-url"
             className="input"
             value={baseUrl}
             onChange={(e) => setBaseUrl(e.target.value)}
             placeholder={t("login.baseUrlPlaceholder")}
             autoFocus
           />
+          {isInsecureBase(baseUrl) && (
+            <div className="lp-warn" role="alert">{t("login.insecureBase")}</div>
+          )}
         </div>
         <div className="form-row">
-          <label>{t("login.managementKey")}</label>
+          <label htmlFor="login-management-key">{t("login.managementKey")}</label>
           <input
+            id="login-management-key"
             className="input"
             type="password"
             value={secretKey}
@@ -65,7 +73,7 @@ export default function Login() {
             placeholder={t("login.managementKeyPlaceholder")}
           />
         </div>
-        {error && <div className="error">{error}</div>}
+        {error && <div className="error" role="alert">{error}</div>}
         <button className="btn primary" type="submit" disabled={busy}>
           {busy ? t("login.verifying") : t("login.submit")}
         </button>

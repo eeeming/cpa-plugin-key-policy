@@ -74,13 +74,13 @@ def main() -> int:
             },
         )
         print(f"seed {provider}/{MODEL}: HTTP {status} {payload}", flush=True)
-        if status not in (200, 201) and not (
+        if status not in (200, 201, 409, 422) and not (
             isinstance(payload, dict)
             and "already" in json.dumps(payload).lower()
         ):
-            # duplicate is acceptable on reruns
-            if status not in (409, 422):
-                print(f"WARN: unexpected seed status {status}", flush=True)
+            # Any other status (including 500) means the price table is not
+            # seeded; fail now instead of surfacing a confusing e2e error later.
+            raise SystemExit(f"seed {provider}/{MODEL} failed: HTTP {status} {payload}")
     status, payload = call("GET", "/v0/management/billing/model-prices")
     if status != 200:
         raise SystemExit(f"list prices failed: {status} {payload}")

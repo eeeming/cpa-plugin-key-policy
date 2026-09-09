@@ -1,5 +1,5 @@
 host: ""
-port: 8317
+port: 8327
 debug: true
 logging-to-file: false
 usage-statistics-enabled: true

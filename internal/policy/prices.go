@@ -26,7 +26,17 @@ type ModelPrice struct {
 // PriceLister fetches the current Plus model-price table.
 type PriceLister func() ([]ModelPrice, error)
 
-const priceCacheTTL = 30 * time.Second
+const (
+	priceCacheTTL = 30 * time.Second
+	// priceHTTPTimeout bounds one price HTTP request.
+	priceHTTPTimeout = 15 * time.Second
+	// priceFetchWait bounds how long a cold-start request waits for the
+	// in-flight first fetch. The lister may issue two requests (the CPAMP path,
+	// then the Home/Plus fallback after a 404), so the bound must cover both
+	// plus margin; otherwise waiters would give up while the fetch is still
+	// running and Admit would skip the USD gate (fail open).
+	priceFetchWait = 2*priceHTTPTimeout + 5*time.Second
+)
 
 // NormalizeServiceTier maps Plus aliases onto the local Standard tier.
 func NormalizeServiceTier(tier string) string {
@@ -126,7 +136,7 @@ func HTTPPriceLister(client *http.Client, baseURL, managementKey string) PriceLi
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	managementKey = strings.TrimSpace(managementKey)
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = &http.Client{Timeout: priceHTTPTimeout}
 	}
 	return func() ([]ModelPrice, error) {
 		if baseURL == "" {

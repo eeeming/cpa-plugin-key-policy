@@ -57,6 +57,11 @@ export function getLocale(): Locale {
 export function setLocale(loc: Locale): void {
   if (!isSupportedLocale(loc) || loc === current) return;
   current = loc;
+  // Keep the document language in sync for screen readers, hyphenation and
+  // :lang() selectors (the iframe does not inherit the panel's <html lang>).
+  if (typeof document !== "undefined" && document.documentElement) {
+    document.documentElement.lang = loc;
+  }
   emit();
 }
 

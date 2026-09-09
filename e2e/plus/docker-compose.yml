@@ -72,7 +72,7 @@ services:
     expose:
       - "8317"
     ports:
-      - "18417:8317"
+      - "127.0.0.1:18417:8317"
 
   e2e:
     image: python:3.12-alpine
@@ -86,6 +86,7 @@ services:
     environment:
       CPA_URL: http://cpa:8317
       PLUS_URL: http://plus:18317
+      MOCK_URL: http://mock:8080
       MGMT_KEY: e2e-mgmt-key
       PLUS_ADMIN_KEY: e2e-admin-key
     volumes:

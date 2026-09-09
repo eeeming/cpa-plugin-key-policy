@@ -144,6 +144,8 @@ Content-Type: application/json
 
 Disable (`enabled: false`) pauses quota for that key; the Plus key still works. Unbind removes the policy only. Deleting the key from Plus `api-keys` is what produces 401.
 
+**Inspect and reset:** `GET /v0/management/plugins/cpa-key-quota/keys/usage?id=<id>` returns one key's 24h/7d USD, call counts, window start/reset times, and the per-model breakdown the card shows. `POST /v0/management/plugins/cpa-key-quota/keys/reset-windows` with `{"ids":["k-a","k-b"]}` zeroes the rolling 24h/7d usage and the RPM minute bucket for those keys; limit numbers, names, and enabled flags are unchanged, and Plus usage is not touched. Unknown ids are reported in `failed`.
+
 ## Rolling windows
 
 Daily and weekly USD limits are **rolling**, not calendar days/weeks:
@@ -191,8 +193,9 @@ Accepted operator risk: Plus’s own `GET /v0/management/api-keys` returns plain
 ## Tests
 
 ```bash
-go test ./internal/policy/ ./internal/plugin/
-cd web && npm test
+make test-all    # Go tests + frontend tests (npm ci && npm test)
+go test -race ./...            # what CI runs for Go
+cd web && npm run typecheck    # tsc --noEmit
 ```
 
 Docker stacks: `make e2e-docker` (Home prices) and `make e2e-plus` (CPA-Manager-Plus). Details: [e2e/README.md](e2e/README.md).

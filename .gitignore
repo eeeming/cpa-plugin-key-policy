@@ -29,8 +29,9 @@ web/vitest.config.d.ts
 web/vitest.config.js
 
 # NOTE: internal/plugin/web/dist/index.html IS tracked. It is the go:embed
-# source for the hosted UI. `make web-build` overwrites it with the real build;
-# the committed copy is a placeholder so the Go build never fails.
+# source for the hosted UI. `make web-build` (and CI) overwrite it with a fresh
+# `VITE_HOSTED=1 npm run build`; the committed copy is that real build, so a
+# plain `go build` embeds the shipped UI.
 
 node_modules/
 
