@@ -166,6 +166,23 @@ HTTP **429**, OpenAI-shaped `error` object:
 
 Unbound and disabled keys are not 429’d by this plugin.
 
+## Free models
+
+A model that bills nothing is exempt from the daily/weekly USD caps: a free
+request cannot consume the budget, so reaching the cap must not block it.
+
+A model counts as free when the price table lists it and **every** rate in the
+matched rule is `0` (input, output, cache read, cache write, per request), or
+when the table has **no rule for it at all** — an unlisted model is never
+billed. A rule that is free for input but charges output is *not* free.
+
+RPM still applies: it limits request rate, not spend. An empty price table does
+not make everything free — with no rules the operator has expressed no intent,
+so the gate behaves exactly as before.
+
+Pricing uses the same matcher as billing (`MatchPlusPrice`), so the gate and the
+bill never disagree about what a request costs.
+
 ## Request path
 
 ```

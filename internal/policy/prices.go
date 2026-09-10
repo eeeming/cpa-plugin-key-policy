@@ -100,6 +100,40 @@ func MatchPrice(prices []ModelPrice, provider, model, serviceTier string, inputT
 	return best, true
 }
 
+// IsFreeModelPrice reports whether a matched price rule bills nothing at all.
+// Every rate must be zero: a rule that is free for input but charges output
+// (or per request, or for cache reads/writes) is NOT free.
+func IsFreeModelPrice(rule ModelPrice) bool {
+	return rule.InputPricePerMillion == 0 &&
+		rule.OutputPricePerMillion == 0 &&
+		rule.CacheReadPricePerMillion == 0 &&
+		rule.CacheWritePricePerMillion == 0 &&
+		rule.RequestPrice == 0
+}
+
+// FreeModel reports whether the given model is free for this key: either the
+// price table carries a rule for it and every rate in that rule is zero, or the
+// table carries no rule for it at all (an unlisted model is never billed, so
+// the request cannot consume the USD budget).
+//
+// An empty table returns false: the operator has expressed no intent yet, and
+// treating every model as free would disable the USD gate wholesale whenever
+// Plus is unreachable.
+//
+// The model is resolved exactly the way billing resolves it (MatchPlusPrice
+// against the model name, then the alias), so enforcement and billing always
+// agree about whether a request costs anything.
+func FreeModel(prices []ModelPrice, provider, model, alias, serviceTier string, inputTokens int64) bool {
+	if len(prices) == 0 {
+		return false
+	}
+	rule, matched := MatchPlusPrice(prices, provider, model, alias, serviceTier, inputTokens)
+	if !matched {
+		return true
+	}
+	return IsFreeModelPrice(rule)
+}
+
 // MatchPlusPrice follows Plus costForPriceWithServiceTier: a long-context
 // wildcard band (min_input_tokens > 0) wins over service-tier / priority
 // prices. Otherwise exact service_tier, then `*`. Tries model then alias.
