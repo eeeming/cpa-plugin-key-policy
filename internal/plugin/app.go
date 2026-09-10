@@ -103,12 +103,29 @@ func (a *App) registration() Registration {
 	}
 }
 
+// interceptModel picks the model name to price the request with. Different CPA
+// versions populate Model or RequestedModel; either identifies the model.
+func interceptModel(req RequestInterceptRequest) string {
+	if m := strings.TrimSpace(req.Model); m != "" {
+		return m
+	}
+	return strings.TrimSpace(req.RequestedModel)
+}
+
 func (a *App) interceptBefore(raw []byte) ([]byte, error) {
 	var req RequestInterceptRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
-	decision := a.store.Admit(req.Headers, nil, req.Metadata)
+	decision := a.store.AdmitRequest(policy.GateRequest{
+		Headers:  req.Headers,
+		Metadata: req.Metadata,
+		// The model decides whether this request bills anything, which exempts
+		// it from the USD caps when the model is free. CPA's intercept payload
+		// carries no alias/provider/service-tier, so the model name (and the
+		// requested name as a fallback) is what the gate can price.
+		Model: interceptModel(req),
+	})
 	if !decision.Terminate {
 		return OKEnvelope(RequestInterceptResponse{})
 	}
