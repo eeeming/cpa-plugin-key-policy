@@ -115,12 +115,30 @@ func (l *usageLedger) ensureWeeklyWindowLocked(st *UsageState, now time.Time) {
 	l.rollWindowLocked(&st.Weekly, weekWindow, now)
 }
 
-func (l *usageLedger) ensureAliasWindowLocked(w *UsageWindow, daily bool, now time.Time) {
-	length := weekWindow
-	if daily {
-		length = dayWindow
+// alignAliasDailyLocked makes an alias's 24h bucket agree with the key-level
+// bucket it sits under. Per-alias buckets used to roll on their own first-bill
+// clock, so a model that went quiet kept a window from a previous key window
+// while the key (still receiving traffic on other models) had already rolled:
+// the card then showed a per-model 24h total far larger than the key's own.
+//
+// The key's window is authoritative. An alias is kept only when its window
+// began inside the current key window (>= key start, which also covers an alias
+// first billed later than the key); anything anchored before it is stale and
+// contributed nothing to the window the key reports.
+//
+// Callers must pass a pointer into the live ledger: the reset assigns *w, so
+// handing it a copy (as `for _, v := range m` does) silently discards it.
+func (l *usageLedger) alignAliasDailyLocked(w *UsageWindow, keyDaily UsageWindow) {
+	if keyDaily.WindowStart.IsZero() || w.WindowStart.Before(keyDaily.WindowStart) {
+		*w = UsageWindow{}
 	}
-	l.rollWindowLocked(w, length, now)
+}
+
+// alignAliasWeeklyLocked is the 7-day equivalent of alignAliasDailyLocked.
+func (l *usageLedger) alignAliasWeeklyLocked(w *UsageWindow, keyWeekly UsageWindow) {
+	if keyWeekly.WindowStart.IsZero() || w.WindowStart.Before(keyWeekly.WindowStart) {
+		*w = UsageWindow{}
+	}
 }
 
 // RecordCost adds a dollar amount for a key+alias to the daily, weekly, and
@@ -172,8 +190,10 @@ func (l *usageLedger) RecordCost(id, alias string, amount, cacheCost float64, ca
 	}
 
 	aliasEntry := st.ByAlias[alias]
-	l.ensureAliasWindowLocked(&aliasEntry.Daily, true, now)
-	l.ensureAliasWindowLocked(&aliasEntry.Weekly, false, now)
+	// Align the alias windows with the key windows this record just advanced,
+	// so the per-model rows always add up to the key-level total.
+	l.alignAliasDailyLocked(&aliasEntry.Daily, st.Daily)
+	l.alignAliasWeeklyLocked(&aliasEntry.Weekly, st.Weekly)
 	l.openWindowLocked(&aliasEntry.Daily, now)
 	l.openWindowLocked(&aliasEntry.Weekly, now)
 	aliasEntry.Daily.TotalUSD += amount
@@ -297,10 +317,11 @@ type AliasUsageEntry struct {
 	Weekly UsageWindow `json:"weekly"`
 }
 
-// AliasUsage returns billed-model rows for a key. Windows are re-evaluated
-// on read so an aged-out total resets for display (the read does not mutate
-// the ledger; the next write commits the reset, mirroring Summary). Rows
-// are sorted by alias for stable display.
+// AliasUsage returns billed-model rows for a key. Windows are re-evaluated on
+// read so an aged-out total resets, committing that reset to the ledger like
+// RecordCost does — otherwise the row would keep reporting a window the key
+// level no longer counts (sum(rows) could exceed the key's own total).
+// Rows are sorted by alias for stable display.
 func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
 	now := l.now()
 	l.mu.Lock()
@@ -308,13 +329,21 @@ func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
 
 	byAlias := make(map[string]AliasUsageEntry)
 	if st := l.entries[key.ID]; st != nil {
-		for alias, w := range st.ByAlias {
-			l.ensureAliasWindowLocked(&w.Daily, true, now)
-			l.ensureAliasWindowLocked(&w.Weekly, false, now)
+		// Re-evaluate the key windows first, then align every alias to them, so
+		// the rows reported here are exactly the rows the key summary counts.
+		l.ensureDailyWindowLocked(st, now)
+		l.ensureWeeklyWindowLocked(st, now)
+		for alias := range st.ByAlias {
+			// Re-read through the pointer: the map value is a copy, so rolling
+			// a copy would discard the reset (see alignAliasDailyLocked).
+			entry := st.ByAlias[alias]
+			l.alignAliasDailyLocked(&entry.Daily, st.Daily)
+			l.alignAliasWeeklyLocked(&entry.Weekly, st.Weekly)
+			st.ByAlias[alias] = entry
 			byAlias[alias] = AliasUsageEntry{
 				Alias:  alias,
-				Daily:  w.Daily,
-				Weekly: w.Weekly,
+				Daily:  entry.Daily,
+				Weekly: entry.Weekly,
 			}
 		}
 	}
