@@ -78,6 +78,11 @@ type Capabilities struct {
 	ManagementAPI                 bool `json:"management_api"`
 }
 
+// RequestInterceptRequest is the full wire shape CPA sends to the interceptor.
+// Body is carried base64-encoded in the JSON envelope and is intentionally NOT
+// decoded by the admission gate (see interceptBeforeRequest in app.go): doing so
+// allocates a copy of the entire request body per in-flight request, which is
+// what made the plugin's heap balloon under concurrent, slow requests.
 type RequestInterceptRequest struct {
 	RequestID      string         `json:"RequestID"`
 	TraceID        string         `json:"TraceID"`
