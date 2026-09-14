@@ -103,8 +103,19 @@ func (a *App) registration() Registration {
 	}
 }
 
+// interceptBeforeRequest is the subset of RequestInterceptRequest the admission
+// gate actually reads. The protocol envelope also carries the full request body
+// (base64-encoded into Body), but decoding it would allocate one copy of every
+// in-flight request body inside the plugin's heap. The gate only needs the API
+// key, which lives in Headers/Metadata, so Body is deliberately not decoded —
+// encoding/json skips it without materialising the octets.
+type interceptBeforeRequest struct {
+	Headers  http.Header    `json:"Headers"`
+	Metadata map[string]any `json:"Metadata"`
+}
+
 func (a *App) interceptBefore(raw []byte) ([]byte, error) {
-	var req RequestInterceptRequest
+	var req interceptBeforeRequest
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
