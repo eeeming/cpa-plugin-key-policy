@@ -328,3 +328,61 @@ func TestGETUsageQueryString(t *testing.T) {
 		t.Fatalf("status=%d body=%s", resp.StatusCode, resp.Body)
 	}
 }
+
+// End-to-end through the plugin entrypoints: once a key is over its daily
+// limit, a paid model is still terminated with 429 while a model that bills
+// nothing (priced at 0, or absent from the table) keeps working.
+func TestFreeModelBypassThroughPluginEntrypoints(t *testing.T) {
+	app := configureApp(t)
+	list := []policy.ModelPrice{
+		{Provider: "openai-compatible", Model: "paid-model", ServiceTier: "*", InputPricePerMillion: 1000, Enabled: true},
+		{Provider: "openai-compatible", Model: "free-model", ServiceTier: "*", Enabled: true},
+	}
+	app.Store().SetPriceLister(func() ([]policy.ModelPrice, error) { return list, nil })
+
+	plain := "sk-free-client"
+	bind := callManagement(t, app, http.MethodPost, "/v0/management/plugins/"+PluginID+"/keys", mustJSON(map[string]any{
+		"id": "free", "name": "free", "key": plain, "rpm": 50, "daily_limit_usd": 1.0,
+	}))
+	if bind.StatusCode != http.StatusCreated {
+		t.Fatalf("bind: %d %s", bind.StatusCode, bind.Body)
+	}
+
+	intercept := func(model string) RequestInterceptResponse {
+		t.Helper()
+		raw, err := app.HandleMethod(MethodRequestInterceptBefore, mustJSON(RequestInterceptRequest{
+			Model:    model,
+			Headers:  http.Header{"Authorization": {"Bearer " + plain}},
+			Metadata: map[string]any{"caller_scope": policy.CallerScope(plain)},
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var resp RequestInterceptResponse
+		decodeEnvelope(t, raw, &resp)
+		return resp
+	}
+
+	// Push the key over its daily cap by billing the paid model.
+	for i := 0; i < 2; i++ {
+		if _, err := app.HandleMethod(MethodUsageHandle, mustJSON(UsageHandleRequest{
+			APIKey: plain, Model: "paid-model", Provider: "openai-compatible",
+			Detail: UsageDetail{InputTokens: 1000},
+		})); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	over := intercept("paid-model")
+	if !over.Terminate || over.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("paid model must be blocked over the cap: %+v", over)
+	}
+	assertOpenAIQuotaError(t, over, "insufficient_quota")
+
+	if free := intercept("free-model"); free.Terminate {
+		t.Fatalf("model priced at 0 must bypass the cap: %+v", free)
+	}
+	if unlisted := intercept("never-priced-model"); unlisted.Terminate {
+		t.Fatalf("model absent from the price table must bypass the cap: %+v", unlisted)
+	}
+}

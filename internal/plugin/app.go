@@ -104,14 +104,26 @@ func (a *App) registration() Registration {
 }
 
 // interceptBeforeRequest is the subset of RequestInterceptRequest the admission
-// gate actually reads. The protocol envelope also carries the full request body
-// (base64-encoded into Body), but decoding it would allocate one copy of every
-// in-flight request body inside the plugin's heap. The gate only needs the API
-// key, which lives in Headers/Metadata, so Body is deliberately not decoded —
-// encoding/json skips it without materialising the octets.
+// gate actually reads: the API key (Headers/Metadata) and the model name the
+// gate prices to decide whether the request bills anything. The protocol
+// envelope also carries the full request body (base64-encoded into Body), but
+// decoding that would allocate one copy of every in-flight request body inside
+// the plugin's heap — encoding/json skips a field the struct does not declare,
+// so Body is deliberately absent here.
 type interceptBeforeRequest struct {
-	Headers  http.Header    `json:"Headers"`
-	Metadata map[string]any `json:"Metadata"`
+	Headers        http.Header    `json:"Headers"`
+	Metadata       map[string]any `json:"Metadata"`
+	Model          string         `json:"Model"`
+	RequestedModel string         `json:"RequestedModel"`
+}
+
+// interceptModel picks the model name to price the request with. Different CPA
+// versions populate Model or RequestedModel; either identifies the model.
+func interceptModel(req interceptBeforeRequest) string {
+	if m := strings.TrimSpace(req.Model); m != "" {
+		return m
+	}
+	return strings.TrimSpace(req.RequestedModel)
 }
 
 func (a *App) interceptBefore(raw []byte) ([]byte, error) {
@@ -119,7 +131,15 @@ func (a *App) interceptBefore(raw []byte) ([]byte, error) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		return nil, err
 	}
-	decision := a.store.Admit(req.Headers, nil, req.Metadata)
+	decision := a.store.AdmitRequest(policy.GateRequest{
+		Headers:  req.Headers,
+		Metadata: req.Metadata,
+		// The model decides whether this request bills anything, which exempts
+		// it from the USD caps when the model is free. CPA's intercept payload
+		// carries no alias/provider/service-tier, so the model name (and the
+		// requested name as a fallback) is what the gate can price.
+		Model: interceptModel(req),
+	})
 	if !decision.Terminate {
 		return OKEnvelope(RequestInterceptResponse{})
 	}

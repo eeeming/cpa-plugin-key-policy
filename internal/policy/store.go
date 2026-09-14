@@ -209,9 +209,36 @@ func (s *Store) StatePath() string {
 // Admit is the request.intercept_before gate. Unknown and disabled policies
 // are no-ops (Known=false or Allowed without Terminate). Bound enabled keys
 // over RPM or (when prices are available) USD limits Terminate with 429.
+//
+// A model that bills nothing (explicitly priced at 0 in the price table, or
+// absent from it, so it is never billed) is exempt from the daily/weekly USD
+// limits: a free request cannot consume the budget, so the cap must not block
+// it. RPM still applies — it is a rate limit on the host, not a spend limit.
 func (s *Store) Admit(headers http.Header, query map[string][]string, metadata map[string]any) AdmitDecision {
-	rawKey := ExtractAPIKey(headers, query)
-	key, pluginOn := s.findBoundWhenEnabled(rawKey, metadata)
+	return s.AdmitRequest(GateRequest{
+		Headers:  headers,
+		Query:    query,
+		Metadata: metadata,
+	})
+}
+
+// GateRequest is one request.intercept_before evaluation.
+type GateRequest struct {
+	Headers  http.Header
+	Query    map[string][]string
+	Metadata map[string]any
+	// Model / Alias / Provider / ServiceTier come from the intercept payload and
+	// are used to price the request and decide whether it is free.
+	Model       string
+	Alias       string
+	Provider    string
+	ServiceTier string
+}
+
+// AdmitRequest evaluates the gate for a full request description.
+func (s *Store) AdmitRequest(req GateRequest) AdmitDecision {
+	rawKey := ExtractAPIKey(req.Headers, req.Query)
+	key, pluginOn := s.findBoundWhenEnabled(rawKey, req.Metadata)
 	if !pluginOn {
 		return AdmitDecision{Reason: "plugin_disabled"}
 	}
@@ -232,18 +259,34 @@ func (s *Store) Admit(headers http.Header, query map[string][]string, metadata m
 			Reason:     "rpm_exceeded",
 		}
 	}
-	if s.PricesAvailable() && usageLedger != nil {
-		if reason, _ := usageLedger.OverLimit(*key); reason != "" {
-			return AdmitDecision{
-				Known:      true,
-				Terminate:  true,
-				StatusCode: http.StatusTooManyRequests,
-				KeyID:      key.ID,
-				Reason:     reason,
+	if usageLedger != nil && !s.requestIsFree(req) {
+		if s.PricesAvailable() {
+			if reason, _ := usageLedger.OverLimit(*key); reason != "" {
+				return AdmitDecision{
+					Known:      true,
+					Terminate:  true,
+					StatusCode: http.StatusTooManyRequests,
+					KeyID:      key.ID,
+					Reason:     reason,
+				}
 			}
 		}
 	}
 	return AdmitDecision{Known: true, Allowed: true, KeyID: key.ID, Reason: "allowed"}
+}
+
+// requestIsFree reports whether this request targets a model that bills
+// nothing. It is judged against the same price table (and the same matcher)
+// that billing uses, so the gate and the bill never disagree.
+func (s *Store) requestIsFree(req GateRequest) bool {
+	if strings.TrimSpace(req.Model) == "" && strings.TrimSpace(req.Alias) == "" {
+		return false
+	}
+	prices, ok := s.cachedPrices()
+	if !ok {
+		return false
+	}
+	return FreeModel(prices, req.Provider, req.Model, req.Alias, req.ServiceTier, 0)
 }
 
 func (s *Store) PricesAvailable() bool {
