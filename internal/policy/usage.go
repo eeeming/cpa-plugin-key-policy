@@ -317,10 +317,22 @@ type AliasUsageEntry struct {
 	Weekly UsageWindow `json:"weekly"`
 }
 
-// AliasUsage returns billed-model rows for a key. Windows are re-evaluated on
-// read so an aged-out total resets, committing that reset to the ledger like
-// RecordCost does — otherwise the row would keep reporting a window the key
-// level no longer counts (sum(rows) could exceed the key's own total).
+// AliasUsage returns the billed-model rows for a key's CURRENT window. Windows
+// are re-evaluated on read so an aged-out total resets, committing that reset to
+// the ledger like RecordCost does — otherwise the row would keep reporting a
+// window the key level no longer counts (sum(rows) could exceed the key's own
+// total).
+//
+// Rows that billed nothing in the current window are then dropped. ByAlias
+// retains every alias the key was ever billed on, so reporting the buckets
+// verbatim listed models with no traffic in this window as $0.0000 / 0 rows
+// forever, growing with every model the key has ever touched. A bucket is kept
+// only when it belongs to the key's live 24h window (>= the key's window start)
+// and billed at least one call or one dollar — a free/unpriced model still
+// records its call, so a zero bucket carries no information. The weekly fields
+// need no such filter: a bucket's week never starts after its day, so a bucket
+// aligned to the live day window is necessarily inside the week the key counts.
+//
 // Rows are sorted by alias for stable display.
 func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
 	now := l.now()
@@ -340,6 +352,14 @@ func (l *usageLedger) AliasUsage(key KeyConfig) []AliasUsageEntry {
 			l.alignAliasDailyLocked(&entry.Daily, st.Daily)
 			l.alignAliasWeeklyLocked(&entry.Weekly, st.Weekly)
 			st.ByAlias[alias] = entry
+			if entry.Daily.WindowStart.Before(st.Daily.WindowStart) {
+				// st.Daily has just been rolled, so this bucket is older than
+				// the live window (or has never been billed): not reported.
+				continue
+			}
+			if entry.Daily.TotalUSD == 0 && entry.Daily.CallCount == 0 {
+				continue
+			}
 			byAlias[alias] = AliasUsageEntry{
 				Alias:  alias,
 				Daily:  entry.Daily,
