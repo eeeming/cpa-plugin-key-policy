@@ -47,6 +47,9 @@ type SchedulerPickResponse struct {
 }
 
 func (s *bindingScheduler) pick(req SchedulerPickRequest) ([]byte, error) {
+	if !bindingRequestIncludesCodex(req) {
+		return OKEnvelope(SchedulerPickResponse{Handled: false})
+	}
 	snapshot, fingerprint, present, err := s.snapshot(req.Options.Headers)
 	if err != nil {
 		return bindingSchedulerError("codex_binding_invalid", "Codex binding snapshot rejected: "+err.Error(), "permission_error", http.StatusForbidden), nil
@@ -86,6 +89,22 @@ func (s *bindingScheduler) pick(req SchedulerPickRequest) ([]byte, error) {
 	session, hasSession := bindingSessionIdentity(req.Options)
 	selected := s.selectAuth(key, session, hasSession, ids, req.Candidates, snapshot, fallback)
 	return OKEnvelope(SchedulerPickResponse{AuthID: selected, Handled: true})
+}
+
+// The host leaves Provider empty for mixed routes and puts their accepted
+// provider keys in Providers. Only routes that can select Codex need binding
+// validation; other routes, including malformed internal headers, stay native.
+// Codex-inclusive mixed routes keep the existing fail-closed binding behavior.
+func bindingRequestIncludesCodex(req SchedulerPickRequest) bool {
+	if strings.EqualFold(strings.TrimSpace(req.Provider), "codex") {
+		return true
+	}
+	for _, provider := range req.Providers {
+		if strings.EqualFold(strings.TrimSpace(provider), "codex") {
+			return true
+		}
+	}
+	return false
 }
 
 // The host preserves only Message and HTTPStatus when converting scheduler

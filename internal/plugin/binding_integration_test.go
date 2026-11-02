@@ -209,7 +209,8 @@ func TestBindingClientHeaderIsReplacedAndTamperingRejected(t *testing.T) {
 	tampered := before.Headers.Clone()
 	tampered.Set(bindingHeader, before.Headers.Get(bindingHeader)+"tampered")
 	raw, err = app.HandleMethod(MethodSchedulerPick, mustJSON(SchedulerPickRequest{
-		Options: SchedulerOptions{Headers: tampered}, Candidates: []SchedulerAuthCandidate{{ID: "a1", Provider: "codex"}},
+		Provider: "codex",
+		Options:  SchedulerOptions{Headers: tampered}, Candidates: []SchedulerAuthCandidate{{ID: "a1", Provider: "codex"}},
 	}))
 	if err != nil {
 		t.Fatal(err)
