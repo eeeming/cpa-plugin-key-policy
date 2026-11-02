@@ -49,11 +49,30 @@ func bindingTestPick(t *testing.T, s *bindingScheduler, req SchedulerPickRequest
 	return envelope, response
 }
 
-func bindingTestError(t *testing.T, envelope Envelope, code string, status int) {
+func bindingTestError(t *testing.T, envelope Envelope, code string, status int) string {
 	t.Helper()
 	if envelope.OK || envelope.Error == nil || envelope.Error.Code != code || envelope.Error.HTTPStatus != status {
 		t.Fatalf("expected %s/%d, got %+v", code, status, envelope)
 	}
+	var body struct {
+		Error *struct {
+			Message string          `json:"message"`
+			Type    string          `json:"type"`
+			Param   json.RawMessage `json:"param"`
+			Code    string          `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(envelope.Error.Message), &body); err != nil {
+		t.Fatalf("scheduler error message is not a JSON response body: %v", err)
+	}
+	errType := "permission_error"
+	if status == http.StatusServiceUnavailable {
+		errType = "server_error"
+	}
+	if body.Error == nil || body.Error.Code != code || body.Error.Type != errType || body.Error.Message == "" || string(body.Error.Param) != "null" {
+		t.Fatalf("expected OpenAI %s/%s error with message and null param, got %s", code, errType, envelope.Error.Message)
+	}
+	return body.Error.Message
 }
 
 // This intentionally bypasses sign's validation to exercise the verifier with

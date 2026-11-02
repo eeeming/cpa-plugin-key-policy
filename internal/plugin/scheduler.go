@@ -49,7 +49,7 @@ type SchedulerPickResponse struct {
 func (s *bindingScheduler) pick(req SchedulerPickRequest) ([]byte, error) {
 	snapshot, fingerprint, present, err := s.snapshot(req.Options.Headers)
 	if err != nil {
-		return ErrorEnvelope("codex_binding_invalid", "Codex binding snapshot rejected: "+err.Error(), http.StatusForbidden), nil
+		return bindingSchedulerError("codex_binding_invalid", "Codex binding snapshot rejected: "+err.Error(), "permission_error", http.StatusForbidden), nil
 	}
 	if !present || !snapshot.Restricted {
 		return OKEnvelope(SchedulerPickResponse{Handled: false})
@@ -61,7 +61,7 @@ func (s *bindingScheduler) pick(req SchedulerPickRequest) ([]byte, error) {
 		ids, priority = bindingMatches(req.Candidates, snapshot, true)
 	}
 	if len(ids) == 0 {
-		return ErrorEnvelope("codex_binding_unavailable", "No available Codex account matches this key's binding", http.StatusServiceUnavailable), nil
+		return bindingSchedulerError("codex_binding_unavailable", "No available Codex account matches this key's binding", "server_error", http.StatusServiceUnavailable), nil
 	}
 	sort.Strings(ids)
 	// A duplicated host record must not become an implicit scheduling weight.
@@ -86,6 +86,20 @@ func (s *bindingScheduler) pick(req SchedulerPickRequest) ([]byte, error) {
 	session, hasSession := bindingSessionIdentity(req.Options)
 	selected := s.selectAuth(key, session, hasSession, ids, req.Candidates, snapshot, fallback)
 	return OKEnvelope(SchedulerPickResponse{AuthID: selected, Handled: true})
+}
+
+// The host preserves only Message and HTTPStatus when converting scheduler
+// errors, so Message must carry the complete client-facing OpenAI error body.
+func bindingSchedulerError(code, message, errType string, status int) []byte {
+	body, _ := json.Marshal(map[string]any{
+		"error": map[string]any{
+			"message": message,
+			"type":    errType,
+			"param":   nil,
+			"code":    code,
+		},
+	})
+	return ErrorEnvelope(code, string(body), status)
 }
 
 // bindingMatches filters before comparing priorities. The host already supplies

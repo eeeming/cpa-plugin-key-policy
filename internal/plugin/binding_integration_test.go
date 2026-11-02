@@ -39,6 +39,56 @@ func pickBindingThroughApp(t *testing.T, app *App, headers http.Header, candidat
 	return response
 }
 
+func TestBindingSchedulerErrorsPreserveHostVisibleBody(t *testing.T) {
+	app := configureApp(t)
+	bindCodexPolicy(t, app, "bound", map[string]any{"codex_auth_ids": []string{"bound-account"}})
+	cases := []struct {
+		name    string
+		headers http.Header
+		code    string
+		status  int
+		message string
+	}{
+		{
+			name:    "unavailable",
+			headers: interceptBearer(t, app, "sk-bound").Headers,
+			code:    "codex_binding_unavailable",
+			status:  http.StatusServiceUnavailable,
+			message: "No available Codex account matches this key's binding",
+		},
+		{
+			name:    "invalid",
+			headers: http.Header{bindingHeader: {"not-a-snapshot"}},
+			code:    "codex_binding_invalid",
+			status:  http.StatusForbidden,
+			message: "Codex binding snapshot rejected: malformed binding snapshot",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := app.HandleMethod(MethodSchedulerPick, mustJSON(SchedulerPickRequest{
+				Provider: "codex", Model: "model", Options: SchedulerOptions{Headers: tc.headers},
+				Candidates: []SchedulerAuthCandidate{{ID: "other-account", Provider: "codex"}},
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var envelope Envelope
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			// Decode only Error.Message as the host's verbatim HTTP response body;
+			// the outer envelope code is not available on its rpcError path.
+			if message := bindingTestError(t, envelope, tc.code, tc.status); message != tc.message {
+				t.Fatalf("client message = %q, want %q", message, tc.message)
+			}
+			if len(envelope.Result) != 0 {
+				t.Fatalf("scheduler failure must use Error, not a rejection result: %s", envelope.Result)
+			}
+		})
+	}
+}
+
 func TestBindingSnapshotsSurvivePatchAndReconfigure(t *testing.T) {
 	app := configureApp(t)
 	bindCodexPolicy(t, app, "a", map[string]any{"codex_auth_ids": []string{"a1"}})

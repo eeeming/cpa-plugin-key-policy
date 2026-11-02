@@ -177,6 +177,8 @@ Content-Type: application/json
 
 **分配变更语义**：每次 admission 读取最新已发布的内存策略，不长期缓存策略，也不在额度检查后第二次查表。仅额度放行后写 `X-Cpa-Key-Quota-Binding`：版本化、HMAC-SHA256 签名的自包含快照，包含不可逆 key 身份、允许的 AuthID、group/fallback 和 restricted 标志，不含下游明文或显示名。PATCH/reconfigure 不换进程签名密钥；每次 pick（含凭证重试）只读快照，不读实时策略。新请求立即用新分配，在途请求沿旧分配跑完。客户端同名头会被清除/覆盖；缺头交还原生，验签失败返回 `codex_binding_invalid`/403；`request.intercept_after` 在执行前清掉内部头。进程/插件重新加载会换密钥，不保证跨重载继续在途请求。
 
+**调度错误响应**：ABI 错误的 message 携带完整 OpenAI 风格 JSON，确保 CPA 保留 `codex_binding_unavailable` / `server_error`（503）及 `codex_binding_invalid` / `permission_error`（403），不被通用错误码替换。非流式及流式首帧前错误保留 HTTP 状态；SSE 已提交后，错误事件保留错误详情，但无法更改已发送的 HTTP 状态。
+
 **凭证目录**：`GET /v0/management/plugins/cpa-key-quota/codex-auths` 返回 `available/source/accounts/diagnostics`。来源为 `host.auth.list`，并补充上限 1024 条的最近候选缓存。账号只返回 `id/label/name/email/status/disabled/unavailable/priority/source`，不返回路径、token 或完整凭证。宿主列表失败时明确 `available:false`；最近观察不是完整目录。成功目录中已缺失的历史项标不可用；UI 保留已选失效项，不自动清空造成解限。无目录也可手填 AuthID，换行/逗号/分号分隔，保留 ID 内部空格。
 
 **诊断**：启动日志、目录 API 与页面均提示“Home 模式下插件 scheduler 会被绕过，绑定不生效；需确保本插件为最高 priority scheduler”。当前 ABI 无法探测 Home、是否最高生效 scheduler、跨 priority 能力是否被接受，三者明确标 `unknown`，不是正常。`scheduler_pick_count` 和 UTC `last_scheduler_pick_at` 只记录观测到的调用；尚无调用时页面提示，可手动刷新，不后台轮询，不记录明文 Key。现有额度/RPM/免费模型逻辑和 `usage.handle` 计费不变。插件卸载/熔断、宿主路径绕过仍可能回落原生，这不是宿主级故障默认拒绝 ACL。

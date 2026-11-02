@@ -26,6 +26,29 @@ func bindingTestSelected(t *testing.T, s *bindingScheduler, req SchedulerPickReq
 	}
 }
 
+func TestBindingSchedulerErrorEscapesMessage(t *testing.T) {
+	message := "Codex binding snapshot rejected: quoted \"error\" at C:\\binding\nnext line"
+	for _, tc := range []struct {
+		code    string
+		errType string
+		status  int
+	}{
+		{"codex_binding_invalid", "permission_error", http.StatusForbidden},
+		{"codex_binding_unavailable", "server_error", http.StatusServiceUnavailable},
+	} {
+		t.Run(tc.code, func(t *testing.T) {
+			raw := bindingSchedulerError(tc.code, message, tc.errType, tc.status)
+			var envelope Envelope
+			if err := json.Unmarshal(raw, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			if got := bindingTestError(t, envelope, tc.code, tc.status); got != message {
+				t.Fatalf("client message = %q, want %q", got, message)
+			}
+		})
+	}
+}
+
 func TestBindingRoundRobinIsStableAndKeyIsolated(t *testing.T) {
 	s := newBindingScheduler()
 	candidates := bindingTestCandidates()
