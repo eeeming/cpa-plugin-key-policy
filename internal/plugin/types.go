@@ -15,6 +15,7 @@ const (
 
 	MethodRequestInterceptBefore = "request.intercept_before"
 	MethodRequestInterceptAfter  = "request.intercept_after"
+	MethodSchedulerPick          = "scheduler.pick"
 
 	MethodUsageHandle = "usage.handle"
 
@@ -97,13 +98,36 @@ type RequestInterceptRequest struct {
 }
 
 type RequestInterceptResponse struct {
-	Headers         http.Header `json:"Headers,omitempty"`
-	Body            []byte      `json:"Body,omitempty"`
-	ClearHeaders    []string    `json:"ClearHeaders,omitempty"`
-	Terminate       bool        `json:"Terminate,omitempty"`
-	StatusCode      int         `json:"StatusCode,omitempty"`
-	ResponseHeaders http.Header `json:"ResponseHeaders,omitempty"`
-	ResponseBody    []byte      `json:"ResponseBody,omitempty"`
+	Headers         http.Header    `json:"Headers,omitempty"`
+	Body            []byte         `json:"Body,omitempty"`
+	Metadata        map[string]any `json:"Metadata,omitempty"`
+	ClearHeaders    []string       `json:"ClearHeaders,omitempty"`
+	Terminate       bool           `json:"Terminate,omitempty"`
+	StatusCode      int            `json:"StatusCode,omitempty"`
+	ResponseHeaders http.Header    `json:"ResponseHeaders,omitempty"`
+	ResponseBody    []byte         `json:"ResponseBody,omitempty"`
+}
+
+type SchedulerPickRequest struct {
+	Options    SchedulerPickOptions     `json:"Options"`
+	Candidates []SchedulerAuthCandidate `json:"Candidates"`
+}
+
+type SchedulerPickOptions struct {
+	Metadata map[string]any `json:"Metadata,omitempty"`
+}
+
+type SchedulerAuthCandidate struct {
+	ID         string            `json:"ID,omitempty"`
+	AuthID     string            `json:"AuthID,omitempty"`
+	Status     string            `json:"Status,omitempty"`
+	Attributes map[string]string `json:"Attributes,omitempty"`
+	Metadata   map[string]any    `json:"Metadata,omitempty"`
+}
+
+type SchedulerPickResponse struct {
+	AuthID  string `json:"AuthID,omitempty"`
+	Handled bool   `json:"Handled"`
 }
 
 type UsageHandleRequest struct {

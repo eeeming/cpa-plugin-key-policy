@@ -58,10 +58,10 @@ func TestRegistrationIdentityAndCapabilities(t *testing.T) {
 		t.Fatalf("name = %q", reg.Metadata.Name)
 	}
 	c := reg.Capabilities
-	if c.FrontendAuthProvider || c.FrontendAuthProviderExclusive || c.ModelRouter || c.Scheduler || c.ResponseInterceptor {
+	if c.FrontendAuthProvider || c.FrontendAuthProviderExclusive || c.ModelRouter || c.ResponseInterceptor {
 		t.Fatalf("must not declare dropped capabilities: %+v", c)
 	}
-	if !c.RequestInterceptor || !c.UsagePlugin || !c.ManagementAPI {
+	if !c.RequestInterceptor || !c.Scheduler || !c.UsagePlugin || !c.ManagementAPI {
 		t.Fatalf("missing required capabilities: %+v", c)
 	}
 }
@@ -511,6 +511,112 @@ func TestCallerScopeFromMetadata(t *testing.T) {
 	decodeEnvelope(t, raw, &resp)
 	if resp.Terminate {
 		t.Fatalf("bound via caller_scope should admit: %+v", resp)
+	}
+}
+
+func TestInterceptStampsSchedulerMetadata(t *testing.T) {
+	app := configureApp(t)
+	plain := "sk-assigned-a"
+	bind := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id":               "assigned-a",
+		"name":             "assigned-a",
+		"key":              plain,
+		"allowed_auth_ids": []string{"auth-a", "auth-b"},
+		"auth_group":       "team-a",
+	}))
+	if bind.StatusCode != http.StatusCreated {
+		t.Fatalf("bind = %d %s", bind.StatusCode, bind.Body)
+	}
+	raw, err := app.HandleMethod(MethodRequestInterceptBefore, mustJSON(RequestInterceptRequest{
+		Metadata: map[string]any{"caller_scope": policy.CallerScope(plain)},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp RequestInterceptResponse
+	decodeEnvelope(t, raw, &resp)
+	if resp.Terminate {
+		t.Fatalf("bound key should admit: %+v", resp)
+	}
+	if got := metadataStringSlice(resp.Metadata, metadataAllowedAuthIDs); len(got) != 2 || got[0] != "auth-a" || got[1] != "auth-b" {
+		t.Fatalf("allowed_auth_ids metadata = %#v", resp.Metadata)
+	}
+	if got := metadataString(resp.Metadata, metadataAuthGroup); got != "team-a" {
+		t.Fatalf("auth_group metadata = %#v", resp.Metadata)
+	}
+}
+
+func TestSchedulerPickUsesAllowedAuthIDs(t *testing.T) {
+	app := configureApp(t)
+	raw, err := app.HandleMethod(MethodSchedulerPick, mustJSON(SchedulerPickRequest{
+		Options: SchedulerPickOptions{
+			Metadata: map[string]any{metadataAllowedAuthIDs: []string{"auth-b", "auth-a"}},
+		},
+		Candidates: []SchedulerAuthCandidate{
+			{ID: "auth-a", Status: "ready"},
+			{AuthID: "auth-b", Status: "ready"},
+			{ID: "auth-c", Status: "ready"},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var resp SchedulerPickResponse
+	decodeEnvelope(t, raw, &resp)
+	if !resp.Handled || resp.AuthID != "auth-b" {
+		t.Fatalf("scheduler pick = %+v", resp)
+	}
+}
+
+func TestSchedulerPickHardFailsWhenNoMatch(t *testing.T) {
+	app := configureApp(t)
+	raw, err := app.HandleMethod(MethodSchedulerPick, mustJSON(SchedulerPickRequest{
+		Options: SchedulerPickOptions{
+			Metadata: map[string]any{metadataAllowedAuthIDs: []string{"auth-missing"}},
+		},
+		Candidates: []SchedulerAuthCandidate{
+			{ID: "auth-a", Status: "ready"},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var env Envelope
+	if err := json.Unmarshal(raw, &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.OK || env.Error == nil || env.Error.Code != "auth_not_found" || env.Error.HTTPStatus != http.StatusServiceUnavailable {
+		t.Fatalf("expected auth_not_found 503, got %+v", env)
+	}
+}
+
+func TestBindPatchIncludesSchedulerAssignmentFields(t *testing.T) {
+	app := configureApp(t)
+	bind := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id":               "sched-1",
+		"name":             "sched-1",
+		"key":              "sk-sched-1",
+		"allowed_auth_ids": []string{"auth-1", "auth-2"},
+		"auth_group":       "ops",
+	}))
+	if bind.StatusCode != http.StatusCreated {
+		t.Fatalf("bind = %d %s", bind.StatusCode, bind.Body)
+	}
+	patched := callManagement(t, app, http.MethodPatch, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id":               "sched-1",
+		"allowed_auth_ids": []string{"auth-2", "auth-3"},
+		"auth_group":       "team-b",
+	}))
+	if patched.StatusCode != http.StatusOK {
+		t.Fatalf("patch = %d %s", patched.StatusCode, patched.Body)
+	}
+	keys := listPublicKeys(t, app)
+	got := keys["sched-1"]
+	if got.AuthGroup != "team-b" {
+		t.Fatalf("auth_group = %q", got.AuthGroup)
+	}
+	if len(got.AllowedAuthIDs) != 2 || got.AllowedAuthIDs[0] != "auth-2" || got.AllowedAuthIDs[1] != "auth-3" {
+		t.Fatalf("allowed_auth_ids = %#v", got.AllowedAuthIDs)
 	}
 }
 

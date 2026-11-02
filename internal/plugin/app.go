@@ -15,6 +15,11 @@ type App struct {
 	store *policy.Store
 }
 
+const (
+	metadataAllowedAuthIDs = "cpa_key_quota_allowed_auth_ids"
+	metadataAuthGroup      = "cpa_key_quota_auth_group"
+)
+
 func NewApp() *App {
 	return &App{store: policy.NewStore()}
 }
@@ -36,6 +41,8 @@ func (a *App) handleMethod(method string, request []byte) ([]byte, error) {
 		return a.interceptBefore(request)
 	case MethodRequestInterceptAfter:
 		return OKEnvelope(RequestInterceptResponse{})
+	case MethodSchedulerPick:
+		return a.pickScheduler(request)
 	case MethodUsageHandle:
 		return a.handleUsage(request)
 	case MethodManagementRegister:
@@ -97,6 +104,7 @@ func (a *App) registration() Registration {
 		},
 		Capabilities: Capabilities{
 			RequestInterceptor: true,
+			Scheduler:          true,
 			UsagePlugin:        true,
 			ManagementAPI:      true,
 		},
@@ -141,7 +149,16 @@ func (a *App) interceptBefore(raw []byte) ([]byte, error) {
 		Model: interceptModel(req),
 	})
 	if !decision.Terminate {
-		return OKEnvelope(RequestInterceptResponse{})
+		resp := RequestInterceptResponse{}
+		if decision.Known && decision.Allowed && decision.KeyID != "" {
+			if key, ok := a.store.KeyByID(decision.KeyID); ok {
+				meta := schedulerMetadata(key)
+				if len(meta) > 0 {
+					resp.Metadata = meta
+				}
+			}
+		}
+		return OKEnvelope(resp)
 	}
 	errType, errCode, message := quotaClientError(decision.Reason)
 	body, _ := json.Marshal(map[string]any{
@@ -162,6 +179,50 @@ func (a *App) interceptBefore(raw []byte) ([]byte, error) {
 		ResponseHeaders: headers,
 		ResponseBody:    body,
 	})
+}
+
+func (a *App) pickScheduler(raw []byte) ([]byte, error) {
+	var req SchedulerPickRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, err
+	}
+	allowedIDs := metadataStringSlice(req.Options.Metadata, metadataAllowedAuthIDs)
+	group := metadataString(req.Options.Metadata, metadataAuthGroup)
+	if len(allowedIDs) == 0 && group == "" {
+		return OKEnvelope(SchedulerPickResponse{Handled: false})
+	}
+	candidates := make([]SchedulerAuthCandidate, 0, len(req.Candidates))
+	for _, cand := range req.Candidates {
+		if !schedulerCandidateAvailable(cand.Status) {
+			continue
+		}
+		if group != "" && !candidateInGroup(cand, group) {
+			continue
+		}
+		candidates = append(candidates, cand)
+	}
+	if len(candidates) == 0 {
+		return ErrorEnvelope("auth_not_found", "no available codex account candidate matches this key policy", http.StatusServiceUnavailable), nil
+	}
+	if len(allowedIDs) > 0 {
+		candidateByID := make(map[string]SchedulerAuthCandidate, len(candidates))
+		for _, cand := range candidates {
+			if id := schedulerCandidateID(cand); id != "" {
+				candidateByID[strings.ToLower(id)] = cand
+			}
+		}
+		for _, allowed := range allowedIDs {
+			if cand, ok := candidateByID[strings.ToLower(allowed)]; ok {
+				return OKEnvelope(SchedulerPickResponse{Handled: true, AuthID: schedulerCandidateID(cand)})
+			}
+		}
+		return ErrorEnvelope("auth_not_found", "no allowed codex account candidate is currently available for this key", http.StatusServiceUnavailable), nil
+	}
+	picked := schedulerCandidateID(candidates[0])
+	if picked == "" {
+		return ErrorEnvelope("auth_not_found", "matched candidate has no auth id", http.StatusServiceUnavailable), nil
+	}
+	return OKEnvelope(SchedulerPickResponse{Handled: true, AuthID: picked})
 }
 
 // quotaClientError maps the plugin's internal admit reason onto OpenAI's
@@ -259,6 +320,8 @@ type keyWriteRequest struct {
 	Name           *string  `json:"name,omitempty"`
 	Enabled        *bool    `json:"enabled,omitempty"`
 	Key            string   `json:"key,omitempty"`
+	AllowedAuthIDs []string `json:"allowed_auth_ids,omitempty"`
+	AuthGroup      *string  `json:"auth_group,omitempty"`
 	RPM            *int     `json:"rpm,omitempty"`
 	DailyLimitUSD  *float64 `json:"daily_limit_usd,omitempty"`
 	WeeklyLimitUSD *float64 `json:"weekly_limit_usd,omitempty"`
@@ -269,6 +332,8 @@ type publicKey struct {
 	Name           string              `json:"name"`
 	Enabled        bool                `json:"enabled"`
 	KeyPreview     string              `json:"key_preview"`
+	AllowedAuthIDs []string            `json:"allowed_auth_ids,omitempty"`
+	AuthGroup      string              `json:"auth_group,omitempty"`
 	RPM            int                 `json:"rpm"`
 	DailyLimitUSD  float64             `json:"daily_limit_usd"`
 	WeeklyLimitUSD float64             `json:"weekly_limit_usd"`
@@ -330,6 +395,8 @@ func (a *App) bindKey(body []byte) ManagementResponse {
 		KeyHash:        hash,
 		KeyPreview:     policy.PreviewKey(plain),
 		CallerScope:    policy.CallerScope(plain),
+		AllowedAuthIDs: req.AllowedAuthIDs,
+		AuthGroup:      applyString(req.AuthGroup),
 		RPM:            rpm,
 		DailyLimitUSD:  applyFloat64(req.DailyLimitUSD, 0),
 		WeeklyLimitUSD: applyFloat64(req.WeeklyLimitUSD, 0),
@@ -358,6 +425,12 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 		}
 		if req.RPM != nil {
 			current.RPM = *req.RPM
+		}
+		if req.AllowedAuthIDs != nil {
+			current.AllowedAuthIDs = req.AllowedAuthIDs
+		}
+		if req.AuthGroup != nil {
+			current.AuthGroup = *req.AuthGroup
 		}
 		if req.DailyLimitUSD != nil {
 			current.DailyLimitUSD = *req.DailyLimitUSD
@@ -483,6 +556,8 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 		Name:           key.Name,
 		Enabled:        key.Enabled,
 		KeyPreview:     key.KeyPreview,
+		AllowedAuthIDs: key.AllowedAuthIDs,
+		AuthGroup:      key.AuthGroup,
 		RPM:            key.RPM,
 		DailyLimitUSD:  key.DailyLimitUSD,
 		WeeklyLimitUSD: key.WeeklyLimitUSD,
@@ -514,6 +589,128 @@ func applyFloat64(v *float64, def float64) float64 {
 		return def
 	}
 	return *v
+}
+
+func applyString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return strings.TrimSpace(*v)
+}
+
+func schedulerMetadata(key policy.KeyConfig) map[string]any {
+	out := make(map[string]any, 2)
+	if len(key.AllowedAuthIDs) > 0 {
+		ids := make([]string, len(key.AllowedAuthIDs))
+		copy(ids, key.AllowedAuthIDs)
+		out[metadataAllowedAuthIDs] = ids
+	}
+	if g := strings.TrimSpace(key.AuthGroup); g != "" {
+		out[metadataAuthGroup] = g
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func schedulerCandidateAvailable(status string) bool {
+	state := strings.ToLower(strings.TrimSpace(status))
+	state = strings.NewReplacer("-", "_", " ", "_").Replace(state)
+	switch state {
+	case "disabled", "error", "expired", "revoked", "invalid", "unavailable", "cooldown", "cooling_down", "quota_exhausted", "exhausted", "blocked":
+		return false
+	default:
+		return true
+	}
+}
+
+func schedulerCandidateID(cand SchedulerAuthCandidate) string {
+	if id := strings.TrimSpace(cand.AuthID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(cand.ID)
+}
+
+func candidateInGroup(cand SchedulerAuthCandidate, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	if want == "" {
+		return true
+	}
+	for _, source := range []string{
+		strings.TrimSpace(cand.Attributes["group"]),
+		strings.TrimSpace(cand.Attributes["plan_type"]),
+		metadataString(cand.Metadata, "group"),
+	} {
+		if strings.ToLower(source) == want && source != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func metadataString(meta map[string]any, key string) string {
+	if meta == nil {
+		return ""
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return ""
+	}
+	switch v := raw.(type) {
+	case string:
+		return strings.TrimSpace(v)
+	default:
+		return strings.TrimSpace(fmt.Sprintf("%v", v))
+	}
+}
+
+func metadataStringSlice(meta map[string]any, key string) []string {
+	if meta == nil {
+		return nil
+	}
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return nil
+	}
+	var out []string
+	switch v := raw.(type) {
+	case []string:
+		out = append(out, v...)
+	case []any:
+		out = make([]string, 0, len(v))
+		for _, item := range v {
+			s := strings.TrimSpace(fmt.Sprintf("%v", item))
+			if s != "" {
+				out = append(out, s)
+			}
+		}
+	case string:
+		parts := strings.Split(v, ",")
+		out = make([]string, 0, len(parts))
+		for _, part := range parts {
+			if s := strings.TrimSpace(part); s != "" {
+				out = append(out, s)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	dedup := make([]string, 0, len(out))
+	for _, item := range out {
+		key := strings.ToLower(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		dedup = append(dedup, item)
+	}
+	if len(dedup) == 0 {
+		return nil
+	}
+	return dedup
 }
 
 func jsonResponse(status int, payload any) ManagementResponse {

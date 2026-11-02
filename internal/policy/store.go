@@ -618,6 +618,14 @@ func (s *Store) Keys() []KeyConfig {
 	return s.keysSnapshotLocked()
 }
 
+func (s *Store) KeyByID(id string) (KeyConfig, bool) {
+	key := s.findByID(id)
+	if key == nil {
+		return KeyConfig{}, false
+	}
+	return *key, true
+}
+
 func (s *Store) keysSnapshotLocked() []KeyConfig {
 	keys := make([]KeyConfig, 0, len(s.keys))
 	for _, key := range s.keys {

@@ -73,6 +73,10 @@
     "daily": "Daily USD (empty = unlimited, rolling 24h)",
     "weekly": "Weekly USD (empty = unlimited, rolling 7d)",
     "rpm": "RPM (empty = unlimited)",
+    "allowedAuthIDs": "Allowed Codex AuthIDs",
+    "allowedAuthIDsHint": "Comma-separated list. When set, scheduler only selects these AuthIDs for this key.",
+    "authGroup": "Codex account group",
+    "authGroupHint": "Optional group filter. Only candidates in this group are selectable for this key.",
     "submit": "Bind",
     "save": "Save",
     "cancel": "Cancel"

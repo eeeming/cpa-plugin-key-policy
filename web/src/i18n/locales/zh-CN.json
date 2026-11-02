@@ -73,6 +73,10 @@
     "daily": "日限额 USD（空=不限，滚动 24 小时）",
     "weekly": "周限额 USD（空=不限，滚动 7 天）",
     "rpm": "RPM（空=不限）",
+    "allowedAuthIDs": "允许的 Codex AuthID",
+    "allowedAuthIDsHint": "用逗号分隔。设置后该 Key 仅会调度到这些 AuthID。",
+    "authGroup": "Codex 账号分组",
+    "authGroupHint": "可选分组过滤。设置后该 Key 仅能使用此分组内候选。",
     "submit": "绑定",
     "save": "保存",
     "cancel": "取消"
