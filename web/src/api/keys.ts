@@ -1,5 +1,5 @@
 import { apiClient, pluginPath } from "./client";
-import type { KeyPublic, KeyWriteRequest, BindKeyResponse, KeyUsageResponse, CodexAuthListResponse } from "../types";
+import type { KeyPublic, KeyWriteRequest, BindKeyResponse, KeyUsageResponse, CodexAuthListResponse, BatchCodexBindingRequest, BatchCodexBindingResponse } from "../types";
 
 export async function listKeys(): Promise<KeyPublic[]> {
   const c = apiClient();
@@ -9,6 +9,11 @@ export async function listKeys(): Promise<KeyPublic[]> {
 
 export async function listCodexAuths(): Promise<CodexAuthListResponse> {
   const { data } = await apiClient().get<CodexAuthListResponse>(pluginPath("/codex-auths"));
+  return data;
+}
+
+export async function batchCodexBinding(req: BatchCodexBindingRequest): Promise<BatchCodexBindingResponse> {
+  const { data } = await apiClient().post<BatchCodexBindingResponse>(pluginPath("/keys/codex-binding/batch"), req);
   return data;
 }
 

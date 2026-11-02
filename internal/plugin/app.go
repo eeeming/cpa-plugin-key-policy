@@ -4,9 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
-	"os"
 	"strings"
 
 	"cpa-key-policy/internal/plugin/web"
@@ -17,13 +15,11 @@ type App struct {
 	store   *policy.Store
 	binding *bindingScheduler
 	catalog *codexCatalog
-	logger  *log.Logger
 }
 
 func NewApp() *App {
 	return &App{
 		store: policy.NewStore(), binding: newBindingScheduler(), catalog: newCodexCatalog(),
-		logger: log.New(os.Stderr, PluginID+": ", log.LstdFlags),
 	}
 }
 
@@ -87,7 +83,6 @@ func (a *App) configure(raw []byte) error {
 		return err
 	}
 	a.store.StartUsageFlusher()
-	a.logger.Print("Codex binding diagnostics: home_mode=unknown; highest_priority_scheduler=unknown; scheduler_across_priorities=unknown. ", codexBindingDiagnosticWarning)
 	return nil
 }
 
@@ -226,6 +221,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodPost, Path: base + "/keys", Description: "Bind an existing Plus api-key and set limits."},
 			{Method: http.MethodPost, Path: base + "/keys/sync", Description: "Import Plus api-keys and aliases; update preview-only names without changing custom names or other policy settings."},
 			{Method: http.MethodPost, Path: base + "/keys/reset-windows", Description: "Reset rolling usage windows for bound keys. Limit numbers are unchanged."},
+			{Method: http.MethodPost, Path: base + "/keys/codex-binding/batch", Description: "Preview or atomically update Codex bindings for selected keys."},
 			{Method: http.MethodPatch, Path: base + "/keys", Description: "Update a bound key policy by id."},
 			{Method: http.MethodDelete, Path: base + "/keys", Description: "Unbind a key policy by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Usage for one bound key by id."},
@@ -259,6 +255,8 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.syncPlusKeys())
 	case req.Method == http.MethodPost && path == base+"/keys/reset-windows":
 		return OKEnvelope(a.resetWindows(req.Body))
+	case req.Method == http.MethodPost && path == base+"/keys/codex-binding/batch":
+		return OKEnvelope(a.batchCodexBinding(req.Body))
 	case req.Method == http.MethodPost && path == base+"/keys":
 		return OKEnvelope(a.bindKey(req.Body))
 	case req.Method == http.MethodPatch && path == base+"/keys":

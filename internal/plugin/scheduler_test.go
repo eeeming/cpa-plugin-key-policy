@@ -73,7 +73,10 @@ func TestBindingRoundRobinPoolContextAndCanonicalAssignment(t *testing.T) {
 		}},
 		{"assignment group", func(snapshot *bindingSnapshot, _ *SchedulerPickRequest) { snapshot.Group = "team" }},
 		{"assignment fallback", func(snapshot *bindingSnapshot, _ *SchedulerPickRequest) { snapshot.Fallback = true }},
-		{"provider", func(_ *bindingSnapshot, req *SchedulerPickRequest) { req.Provider = "another-route" }},
+		{"mixed Codex route", func(_ *bindingSnapshot, req *SchedulerPickRequest) {
+			req.Provider = ""
+			req.Providers = []string{"codex"}
+		}},
 		{"model", func(_ *bindingSnapshot, req *SchedulerPickRequest) { req.Model = "another-model" }},
 		{"priority", func(_ *bindingSnapshot, req *SchedulerPickRequest) {
 			req.Candidates = []SchedulerAuthCandidate{{ID: "a", Provider: "codex", Priority: 5}, {ID: "b", Provider: "codex", Priority: 5}}
@@ -198,6 +201,91 @@ func TestBindingMissingHeaderAndUnrestrictedAreUnhandled(t *testing.T) {
 	}
 	if s.pools != nil || len(s.poolOrder) != 0 {
 		t.Fatal("unrestricted requests established round-robin pools")
+	}
+}
+
+func TestBindingNonCodexRoutesDelegateBeforeSnapshotValidation(t *testing.T) {
+	routes := []struct {
+		name      string
+		provider  string
+		providers []string
+	}{
+		{name: "Claude", provider: "claude", providers: []string{"claude"}},
+		{name: "normalized Claude", provider: " CLAUDE ", providers: []string{"claude"}},
+		{name: "OpenAI", provider: "openai", providers: []string{"openai"}},
+		{name: "OpenAI compatibility", provider: "openai-compatibility", providers: []string{"openai-compatibility"}},
+		{name: "custom compatibility provider", provider: "my-upstream", providers: []string{"my-upstream"}},
+		{name: "Codex substring is custom", provider: "my-codex", providers: []string{"my-codex"}},
+		{name: "mixed non-Codex", providers: []string{"claude", "my-upstream"}},
+		{name: "mixed single compatibility provider", providers: []string{"my-upstream"}},
+	}
+	for _, route := range routes {
+		t.Run(route.name, func(t *testing.T) {
+			s := newBindingScheduler()
+			bound := bindingTestRequest(t, s, bindingTestSnapshot("bound"), nil)
+			unbound := bindingTestRequest(t, s, bindingSnapshot{KeyID: "unbound"}, nil)
+			for _, headerCase := range []struct {
+				name    string
+				headers map[string][]string
+			}{
+				{name: "bound", headers: bound.Options.Headers},
+				{name: "unbound", headers: unbound.Options.Headers},
+				{name: "no snapshot"},
+				{name: "malformed snapshot", headers: map[string][]string{bindingHeader: {"not-a-snapshot"}}},
+				{name: "duplicate snapshot", headers: map[string][]string{bindingHeader: {"invalid", "invalid"}}},
+			} {
+				t.Run(headerCase.name, func(t *testing.T) {
+					req := SchedulerPickRequest{
+						Provider:  route.provider,
+						Providers: route.providers,
+						Model:     "shared-model",
+						Options:   SchedulerOptions{Headers: headerCase.headers},
+						Candidates: []SchedulerAuthCandidate{
+							{ID: "native-account", Provider: route.providers[0]},
+						},
+					}
+					envelope, response := bindingTestPick(t, s, req)
+					if !envelope.OK || envelope.Error != nil || response != (SchedulerPickResponse{}) {
+						t.Fatalf("non-Codex route must delegate without forcing auth: envelope=%+v response=%+v", envelope, response)
+					}
+				})
+			}
+			if len(s.pools) != 0 || len(s.sessions) != 0 {
+				t.Fatal("non-Codex routes established binding selection state")
+			}
+		})
+	}
+}
+
+func TestBindingCodexProviderFormsPreserveRestrictions(t *testing.T) {
+	for _, route := range []struct {
+		name      string
+		provider  string
+		providers []string
+	}{
+		{name: "primary", provider: "codex", providers: []string{"codex"}},
+		{name: "normalized primary", provider: " CODEX "},
+		{name: "mixed only Codex", providers: []string{"codex"}},
+		{name: "normalized provider list", providers: []string{" CODEX "}},
+		{name: "mixed including Codex", providers: []string{"claude", "codex"}},
+	} {
+		t.Run(route.name, func(t *testing.T) {
+			s := newBindingScheduler()
+			req := bindingTestRequest(t, s, bindingTestSnapshot("bound"), []SchedulerAuthCandidate{
+				{ID: "native-account", Provider: "claude", Priority: 100},
+				{ID: "outside-binding", Provider: "codex", Priority: 50},
+				{ID: "a", Provider: "codex"},
+			})
+			req.Provider = route.provider
+			req.Providers = route.providers
+			bindingTestSelected(t, s, req, "a")
+			req.Candidates = req.Candidates[:2]
+			envelope, _ := bindingTestPick(t, s, req)
+			bindingTestError(t, envelope, "codex_binding_unavailable", http.StatusServiceUnavailable)
+			req.Options.Headers = map[string][]string{bindingHeader: {"not-a-snapshot"}}
+			envelope, _ = bindingTestPick(t, s, req)
+			bindingTestError(t, envelope, "codex_binding_invalid", http.StatusForbidden)
+		})
 	}
 }
 
@@ -373,7 +461,10 @@ func TestBindingSessionScopeIsolation(t *testing.T) {
 		{"fingerprint", func(snapshot *bindingSnapshot, _ *SchedulerPickRequest) {
 			snapshot.AuthIDs = []string{"a", "b", "unused"}
 		}},
-		{"provider", func(_ *bindingSnapshot, req *SchedulerPickRequest) { req.Provider = "other-route" }},
+		{"provider", func(_ *bindingSnapshot, req *SchedulerPickRequest) {
+			req.Provider = ""
+			req.Providers = []string{"codex", "openai-native"}
+		}},
 		{"model", func(_ *bindingSnapshot, req *SchedulerPickRequest) { req.Model = "other-model" }},
 	}
 	for _, tc := range cases {

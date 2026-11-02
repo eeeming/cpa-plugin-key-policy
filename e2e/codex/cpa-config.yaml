@@ -29,6 +29,48 @@ api-keys:
   - "sk-k4"
   - "sk-k5"
   - "sk-quota"
+  - "sk-routing-bound"
+  - "sk-routing-unbound"
+
+# Exercise host-native compatibility execution against the local HTTP mock.
+# Keep the legacy schema used by the rest of this fixture (not v8 api-keys).
+openai-compatibility:
+  - name: "e2e-openai-native"
+    base-url: "http://mock:8080/v1"
+    api-key-entries:
+      - api-key: "sk-upstream-openai"
+    models:
+      - name: "e2e-openai-native"
+        alias: "e2e-openai"
+
+# Native Gemini API-key execution also stays on the local HTTP mock.
+gemini-api-key:
+  - api-key: "tok-gemini-a"
+    base-url: "http://mock:8080"
+    models:
+      - name: "gemini-2.5-flash"
+        alias: "e2e-gemini"
+
+# OAuth aliases are resolved by the host, not by the key-policy plugin.
+# fork retains the original models used throughout the existing Codex scenarios.
+oauth-model-alias:
+  codex:
+    - name: "gpt-5.6-sol"
+      alias: "e2e-codex-alias"
+      fork: true
+  claude:
+    - name: "claude-sonnet-4-5-20250929"
+      alias: "e2e-claude"
+      fork: true
+
+# Native Codex payload rules run after alias resolution and translation.
+payload:
+  override:
+    - models:
+        - name: "gpt-5.6-sol"
+          protocol: "codex"
+      params:
+        "metadata.e2e_payload": "codex-override"
 
 plugins:
   enabled: true

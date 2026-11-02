@@ -40,6 +40,29 @@ export interface KeyWriteRequest {
   codex_fallback?: boolean;
 }
 
+export interface CodexBinding {
+  codex_auth_ids: string[];
+  codex_group: string;
+  codex_fallback: boolean;
+}
+
+export interface BatchCodexBindingRequest {
+  ids: string[];
+  accounts_mode?: "keep" | "set" | "add" | "remove";
+  codex_auth_ids?: string[];
+  codex_group?: string;
+  codex_fallback?: boolean;
+  clear?: boolean;
+  dry_run?: boolean;
+  expected?: { id: string; before: CodexBinding }[];
+}
+
+export interface BatchCodexBindingResponse {
+  dry_run: boolean;
+  updated: number;
+  changes: { id: string; before: CodexBinding; after: CodexBinding }[];
+}
+
 export interface BindKeyResponse {
   key: KeyPublic;
 }
@@ -93,12 +116,8 @@ export interface CodexAuthAccount {
 }
 
 export interface CodexSchedulerDiagnostics {
-  home_mode: "unknown";
-  highest_priority_scheduler: "unknown";
-  scheduler_across_priorities: "unknown";
   scheduler_pick_count: number;
   last_scheduler_pick_at?: string;
-  warning: string;
 }
 
 export interface CodexAuthListResponse {

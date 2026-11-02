@@ -6,6 +6,7 @@ import { hasAnyLimit, limitPatch, parseLimits, type LimitInputs } from "../bulk"
 import { useT } from "../i18n";
 import KeyCard from "../components/KeyCard";
 import CodexBindingFields from "../components/CodexBindingFields";
+import BatchCodexBindingModal from "../components/BatchCodexBindingModal";
 import SchedulerDiagnostics from "../components/SchedulerDiagnostics";
 import { codexBindingPatch, initialCodexBinding } from "../codexBinding";
 import {
@@ -48,6 +49,7 @@ export default function Policy() {
   const [edit, setEdit] = useState<KeyPublic | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [showBulk, setShowBulk] = useState(false);
+  const [batchCodexIds, setBatchCodexIds] = useState<string[] | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [marquee, setMarquee] = useState<Rect | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
@@ -302,6 +304,7 @@ export default function Policy() {
         <span className="tb-split" aria-hidden="true" />
         <div className="fp-actions">
           <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => setShowBulk(true)}>{t("keys.setLimits")}</button>
+          <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => setBatchCodexIds([...selected])}>{t("batchCodex.action")}</button>
           <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => void resetSelected()}>{t("keys.reset")}</button>
           <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => void setEnabledSelected(true)}>{t("keys.enable")}</button>
           <button className="btn sm" type="button" disabled={!hasSel || bulkBusy} onClick={() => void setEnabledSelected(false)}>{t("keys.disable")}</button>
@@ -377,6 +380,15 @@ export default function Policy() {
           onSubmit={applyBulkLimits}
         />
       )}
+      {batchCodexIds && <BatchCodexBindingModal
+        ids={batchCodexIds}
+        onClose={() => setBatchCodexIds(null)}
+        onApplied={async (updated) => {
+          setBatchCodexIds(null);
+          setNotice(t("batchCodex.done", { count: updated }));
+          await load();
+        }}
+      />}
     </div>
   );
 }

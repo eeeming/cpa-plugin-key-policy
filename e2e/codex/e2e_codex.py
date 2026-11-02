@@ -4,9 +4,11 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import datetime
 import json
 import os
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -22,6 +24,9 @@ BASE = f"/v0/management/plugins/{PLUGIN}"
 MODEL = os.environ.get("CODEX_MODEL", "gpt-5.6-sol")
 HEADER = "X-Cpa-Key-Quota-Binding"
 AUTH = {"A": "codex-a.json", "B": "codex-b.json"}
+ROUTING_ID = "routing-bound"
+ROUTING_KEY = "sk-routing-bound"
+UNBOUND_KEY = "sk-routing-unbound"
 
 results: list[tuple[str, bool, str]] = []
 current = "setup"
@@ -81,7 +86,7 @@ def err_code(payload) -> str:
     return str(payload)[:200]
 
 
-def send(key, kind="chat", stream=False, session=None, extra=None, prompt=None):
+def send(key, kind="chat", stream=False, session=None, extra=None, prompt=None, model=MODEL, timeout=30):
     """One downstream request; returns (status, payload, account served or None)."""
     prompt = prompt or f"ping {uuid.uuid4()}"
     headers = {"Authorization": "Bearer " + key}
@@ -90,12 +95,12 @@ def send(key, kind="chat", stream=False, session=None, extra=None, prompt=None):
     headers.update(extra or {})
     if kind == "chat":
         path = "/v1/chat/completions"
-        body = {"model": MODEL, "messages": [{"role": "user", "content": prompt}], "stream": stream}
+        body = {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": stream}
     else:
         path = "/v1/responses"
-        body = {"model": MODEL, "input": prompt, "stream": stream}
+        body = {"model": model, "input": prompt, "stream": stream}
     before = len(calls())
-    status, payload, ctype = http("POST", CPA + path, headers=headers, body=body, raw_body=stream)
+    status, payload, ctype = http("POST", CPA + path, headers=headers, body=body, raw_body=stream, timeout=timeout)
     after = calls()
     new = after[before:]
     account = new[-1]["account"] if new else None
@@ -133,8 +138,64 @@ def patch(key_id, **fields):
     return payload
 
 
+def binding(ids=(), group="", fallback=False):
+    return {"codex_auth_ids": sorted(ids), "codex_group": group, "codex_fallback": fallback}
+
+
+def bindings(key_ids):
+    status, payload = mgmt("GET", BASE + "/keys")
+    check(status == 200, f"read binding state -> HTTP {status}")
+    rows = (payload.get("keys") if isinstance(payload, dict) else payload) or []
+    rows = {row["id"]: row for row in rows}
+    return {key_id: binding(rows[key_id].get("codex_auth_ids") or [],
+                            rows[key_id].get("codex_group", ""),
+                            rows[key_id].get("codex_fallback", False)) for key_id in key_ids}
+
+
+def batch(key_ids, before, after, **fields):
+    dry_run = fields.get("dry_run", False)
+    status, payload = mgmt("POST", BASE + "/keys/codex-binding/batch", {"ids": key_ids, **fields})
+    check(status == 200, f"batch {fields} -> HTTP {status} {payload if status != 200 else ''}")
+    if status != 200 or not isinstance(payload, dict):
+        return []
+    check(payload.get("dry_run") is dry_run and payload.get("updated") == (0 if dry_run else len(key_ids)),
+          f"batch dry_run/updated: {payload.get('dry_run')}/{payload.get('updated')}")
+    changes = payload.get("changes", [])
+    expected = {key_id: {"id": key_id, "before": before[key_id], "after": after[key_id]} for key_id in key_ids}
+    actual = {row.get("id"): row for row in changes}
+    check(len(changes) == len(key_ids) and actual == expected,
+          f"batch returns complete before/after (including empty/false): {changes}")
+    check(bindings(key_ids) == (before if dry_run else after),
+          "dry-run leaves published bindings unchanged" if dry_run else "all selected bindings match the apply result")
+    return [{"id": row["id"], "before": row["before"]} for row in changes]
+
+
+def routes_unchanged():
+    for key, wanted in (("sk-k1", "A"), ("sk-k2", "B")):
+        status, payload, account = send(key)
+        check(status == 200 and account == wanted,
+              f"unchanged {key} routes to {wanted}: HTTP {status} account={account} {payload if status != 200 else ''}")
+
+
+def observed_picks():
+    status, payload = mgmt("GET", BASE + "/codex-auths")
+    diagnostics = payload.get("diagnostics", {}) if isinstance(payload, dict) else {}
+    count = diagnostics.get("scheduler_pick_count")
+    check(status == 200 and isinstance(count, int) and not isinstance(count, bool) and count >= 0,
+          f"observed scheduler callback count: HTTP {status} count={count}")
+    timestamp = diagnostics.get("last_scheduler_pick_at")
+    if count:
+        try:
+            parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            valid_time = parsed.tzinfo is not None and parsed.timestamp() <= time.time() + 5
+        except (AttributeError, TypeError, ValueError):
+            valid_time = False
+        check(valid_time, f"observed last scheduler callback time: {timestamp!r}")
+    return count or 0, timestamp
+
+
 def pick_count() -> int:
-    return int(mgmt("GET", BASE + "/codex-auths")[1]["diagnostics"]["scheduler_pick_count"])
+    return observed_picks()[0]
 
 
 def set_auth_disabled(name, disabled):
@@ -158,10 +219,120 @@ def wait_ready(timeout=120):
 
 
 def seed_prices():
-    body = {"prices": {MODEL: {"prompt": 1000, "completion": 0, "cache": 0, "cacheRead": 0,
-                               "promptConfigured": True, "completionConfigured": True, "source": "e2e"}}}
+    models = (MODEL, "e2e-codex-alias", "e2e-openai", "e2e-openai-native", "e2e-claude",
+              "claude-sonnet-4-5-20250929", "e2e-gemini", "gemini-2.5-flash")
+    body = {"prices": {model: {"prompt": 1000, "completion": 0, "cache": 0, "cacheRead": 0,
+                               "promptConfigured": True, "completionConfigured": True, "source": "e2e"}
+                       for model in models}}
     status, payload = plus("PUT", "/v0/management/model-prices", body)
-    check(status in (200, 201), f"seed Plus price {MODEL} prompt=1000/M -> HTTP {status}")
+    check(status in (200, 201), f"seed Plus prices for {len(models)} fixture models/aliases at prompt=1000/M -> HTTP {status}")
+
+
+def provider_case(key, model, provider, account, upstream_model):
+    before = len(calls())
+    status, payload, served = send(key, model=model, extra={HEADER: "forged-client-value"})
+    recorded = calls()[before:]
+    check(status == 200 and served == account,
+          f"{key} native {provider}: HTTP {status} account={served} {payload if status != 200 else ''}")
+    check(len(recorded) == 1 and recorded[0].get("provider") == provider
+          and recorded[0].get("account") == account and recorded[0].get("model") == upstream_model,
+          f"{provider} native account/model observed: {[(r.get('provider'), r.get('account'), r.get('model')) for r in recorded]}")
+    leaked = [row["n"] for row in recorded if HEADER.lower() in row["header_names"]]
+    check(bool(recorded) and not leaked, f"{provider} clears internal binding header for {key}: leaked={leaked}")
+
+
+def inflight_case():
+    section("12 batch update during in-flight request")
+    original = bindings([ROUTING_ID])
+    both = {ROUTING_ID: binding(AUTH.values())}
+    batch([ROUTING_ID], original, both, accounts_mode="set", codex_auth_ids=list(AUTH.values()))
+    old_retry = None
+    worker = None
+    outcome = {}
+    retry_supported = False
+    try:
+        status, payload = mgmt("GET", "/v0/management/request-retry")
+        value = payload.get("request-retry") if isinstance(payload, dict) else None
+        if status == 200 and isinstance(value, int) and not isinstance(value, bool):
+            # Remember before PATCH: even a failed HTTP response may follow an applied write.
+            old_retry = value
+            status, payload = mgmt("PATCH", "/v0/management/request-retry", {"value": 1})
+            retry_supported = status == 200
+        if not retry_supported:
+            print("LIMITATION: host retry management unavailable; exercising hold-success snapshot continuity, not retry.", flush=True)
+        session = None
+        for i in range(16):
+            candidate = f"e2e-old-snapshot-{i}-{uuid.uuid4()}"
+            status, _, account = send(ROUTING_KEY, session=candidate)
+            if status == 200 and account == "A":
+                session = candidate
+                break
+        if not check(session is not None, "found a stable A session for old A+B allocation"):
+            return
+        marker = "e2e-held-" + str(uuid.uuid4())
+        status, payload, _ = http("POST", MOCK + "/hold", body={
+            "account": "A", "match": marker, "status": 500 if retry_supported else 200})
+        if not check(status == 200, f"arm one-shot upstream gate: HTTP {status} {payload}"):
+            return
+
+        def request_old():
+            try:
+                outcome["response"] = send(ROUTING_KEY, session=session, prompt=marker, timeout=90)
+            except Exception as exc:
+                outcome["error"] = str(exc)
+
+        worker = threading.Thread(target=request_old, daemon=True)
+        worker.start()
+        deadline = time.monotonic() + 15
+        gate = {}
+        while time.monotonic() < deadline:
+            status, gate, _ = http("GET", MOCK + "/gate")
+            if status == 200 and gate.get("held"):
+                break
+            if not worker.is_alive():
+                break
+            time.sleep(0.05)
+        if not check(gate.get("held") is True and not gate.get("released"),
+                     f"old request reached A and is still in flight: {gate}"):
+            return
+        new_account = "A" if retry_supported else "B"
+        after = {ROUTING_ID: binding([AUTH[new_account]])}
+        batch([ROUTING_ID], both, after, accounts_mode="set", codex_auth_ids=[AUTH[new_account]])
+        status, _, account = send(ROUTING_KEY, session=session)
+        check(status == 200 and account == new_account and worker.is_alive(),
+              f"new request uses {new_account}-only allocation before old request released: HTTP {status} {account}")
+        status, payload, _ = http("POST", MOCK + "/release", body={})
+        check(status == 200, f"release old upstream request: HTTP {status} {payload}")
+        worker.join(timeout=35)
+        check(not worker.is_alive() and "error" not in outcome, f"old request completed: {outcome}")
+        response = outcome.get("response", (None, None, None))
+        wanted_account = "B" if retry_supported else "A"
+        check(response[0] == 200 and response[2] == wanted_account,
+              f"old {'retry retains A+B snapshot and reaches B excluded by new A-only binding' if retry_supported else 'in-flight response retains old A allocation'}: {response}")
+        request_calls = [row for row in calls() if marker in json.dumps(row.get("body", {}))]
+        expected_accounts = ["A", "B"] if retry_supported else ["A"]
+        check([row["account"] for row in request_calls] == expected_accounts,
+              f"old request observed upstream attempt sequence: {[row['account'] for row in request_calls]}")
+    finally:
+        try:
+            status, payload, _ = http("POST", MOCK + "/release", body={})
+            check(status == 200, f"cleanup releases mock gate: HTTP {status} {payload}")
+        except Exception as exc:
+            check(False, f"cleanup mock release failed: {exc}")
+        if worker is not None:
+            worker.join(timeout=35)
+            check(not worker.is_alive(), "cleanup waits for old downstream request")
+        if old_retry is not None:
+            try:
+                status, payload = mgmt("PATCH", "/v0/management/request-retry", {"value": old_retry})
+                check(status == 200, f"restore host request-retry={old_retry}: HTTP {status} {payload}")
+            except Exception as exc:
+                check(False, f"restoring request-retry failed: {exc}")
+        try:
+            patch(ROUTING_ID, codex_auth_ids=original[ROUTING_ID]["codex_auth_ids"],
+                  codex_group=original[ROUTING_ID]["codex_group"], codex_fallback=original[ROUTING_ID]["codex_fallback"])
+        except Exception as exc:
+            check(False, f"restoring original binding failed: {exc}")
 
 
 def main() -> int:
@@ -191,6 +362,8 @@ def main() -> int:
     section("2 static binding")
     bind("k1", "sk-k1", codex_auth_ids=[AUTH["A"]])
     bind("k2", "sk-k2", codex_auth_ids=[AUTH["B"]])
+    bind(ROUTING_ID, ROUTING_KEY, rpm=0, daily_limit_usd=0, weekly_limit_usd=0, codex_auth_ids=[AUTH["A"]])
+    bind("routing-unbound", UNBOUND_KEY, rpm=0, daily_limit_usd=0, weekly_limit_usd=0)
     a1 = run("sk-k1", 8, "k1->A")
     check(a1 and all(a == "A" for a in a1), f"k1 bound to A: all 8 on A ({a1})")
     a2 = run("sk-k2", 8, "k2->B")
@@ -217,6 +390,91 @@ def main() -> int:
     patch("k1", codex_auth_ids=[AUTH["A"]])
     a = run("sk-k1", 4, "k1 after B->A")
     check(a and all(x == "A" for x in a), f"k1 switched back to A: {a}")
+
+    section("3b batch operations & preview")
+    selected = ["k1", "k2"]
+    original = bindings(selected)
+    on_b = {key_id: binding([AUTH["B"]]) for key_id in selected}
+    preview = batch(selected, original, on_b, accounts_mode="set", codex_auth_ids=[AUTH["B"]], dry_run=True)
+    routes_unchanged()
+    batch(selected, original, on_b, accounts_mode="set", codex_auth_ids=[AUTH["B"]], expected=preview)
+    for key in ("sk-k1", "sk-k2"):
+        accounts = run(key, 4, "batch set B " + key)
+        check(accounts == ["B"] * 4, f"batch set: new {key} requests all on B: {accounts}")
+    on_a = {key_id: binding([AUTH["A"]]) for key_id in selected}
+    batch(selected, on_b, on_a, accounts_mode="set", codex_auth_ids=[" " + AUTH["A"] + " ", AUTH["A"], ""])
+    on_both = {key_id: binding(AUTH.values()) for key_id in selected}
+    batch(selected, on_a, on_both, accounts_mode="add", codex_auth_ids=[AUTH["B"], AUTH["B"]])
+    for key in ("sk-k1", "sk-k2"):
+        accounts = run(key, 6, "batch add B " + key)
+        check(set(accounts) == {"A", "B"}, f"batch add uses both accounts for {key}: {accounts}")
+    batch(selected, on_both, on_b, accounts_mode="remove", codex_auth_ids=[AUTH["A"]])
+    for key in ("sk-k1", "sk-k2"):
+        accounts = run(key, 4, "batch remove A " + key)
+        check(accounts == ["B"] * 4, f"batch remove excludes A for {key}: {accounts}")
+    empty = {key_id: binding() for key_id in selected}
+    batch(selected, on_b, empty, accounts_mode="set", codex_auth_ids=[])
+    for key in ("sk-k1", "sk-k2"):
+        accounts = run(key, 6, "batch set [] " + key)
+        check(set(accounts) == {"A", "B"}, f"set [] clears only account restriction for {key}: {accounts}")
+    batch(selected, empty, on_b, accounts_mode="set", codex_auth_ids=[AUTH["B"]])
+    grouped = {key_id: binding([AUTH["B"]], group="e2e-no-such-plan") for key_id in selected}
+    batch(selected, on_b, grouped, codex_group=" E2E-No-Such-Plan ")
+    before_calls = len(calls())
+    for key in ("sk-k1", "sk-k2"):
+        status, payload, _ = send(key)
+        check(status == 503 and err_code(payload) == "codex_binding_unavailable",
+              f"batch group restriction rejects unmatched {key}: HTTP {status} {err_code(payload)}")
+    check(len(calls()) == before_calls, "unmatched batch group never reaches upstream")
+    fallback = {key_id: binding([AUTH["B"]], group="e2e-no-such-plan", fallback=True) for key_id in selected}
+    batch(selected, grouped, fallback, accounts_mode="keep", codex_fallback=True)
+    for key in ("sk-k1", "sk-k2"):
+        accounts = run(key, 4, "batch group fallback " + key)
+        check(all(account in ("A", "B") for account in accounts), f"batch fallback serves {key}: {accounts}")
+    fallback_no_ids = {key_id: binding(group="e2e-no-such-plan", fallback=True) for key_id in selected}
+    batch(selected, fallback, fallback_no_ids, accounts_mode="set", codex_auth_ids=[])
+    batch(selected, fallback_no_ids, empty, clear=True)
+    for key in ("sk-k1", "sk-k2"):
+        accounts = run(key, 6, "batch clear " + key)
+        check(set(accounts) == {"A", "B"}, f"batch clear removes group/fallback and routes {key} natively: {accounts}")
+    batch(selected, empty, on_a, accounts_mode="set", codex_auth_ids=[AUTH["A"]])
+    patch("k2", codex_auth_ids=[AUTH["B"]])
+
+    section("3c atomic validation failures & conflicts")
+    original = bindings(selected)
+    valid_expected = [{"id": key_id, "before": original[key_id]} for key_id in selected]
+    bad_batches = [
+        (404, {"ids": ["k1", "missing-key"], "accounts_mode": "set", "codex_auth_ids": [AUTH["B"]]}),
+        (400, {"ids": ["k1", 7], "accounts_mode": "set", "codex_auth_ids": [AUTH["B"]]}),
+        (400, {"ids": ["k1", " k2 "], "clear": True}),
+        (400, {"ids": ["k1", "k1"], "clear": True}),
+        (400, {"ids": [], "clear": True}),
+        (400, {"ids": selected}),
+        (400, {"ids": selected, "accounts_mode": "keep"}),
+        (400, {"ids": selected, "accounts_mode": "replace", "codex_auth_ids": [AUTH["B"]]}),
+        (400, {"ids": selected, "accounts_mode": "set", "codex_auth_ids": "not-an-array"}),
+        (400, {"ids": selected, "codex_fallback": "true"}),
+        (400, {"ids": selected, "codex_group": 7}),
+        (400, {"ids": selected, "clear": True, "codex_fallback": False}),
+        (400, {"ids": selected, "clear": True, "daily_limit_usd": 0}),
+        (400, {"ids": selected, "clear": True, "expected": valid_expected[:1]}),
+        (400, {"ids": selected, "clear": True, "expected": [valid_expected[0], valid_expected[0]]}),
+        (400, {"ids": selected, "clear": True, "expected": valid_expected + [{"id": "extra", "before": binding()}]}),
+    ]
+    for wanted_status, payload in bad_batches:
+        status, response = mgmt("POST", BASE + "/keys/codex-binding/batch", payload)
+        check(status == wanted_status, f"reject entire invalid batch {payload}: HTTP {status}, expected {wanted_status}: {response}")
+        check(bindings(selected) == original, "invalid batch leaves every prior binding unchanged")
+        routes_unchanged()
+    stale = batch(selected, original, on_b, accounts_mode="set", codex_auth_ids=[AUTH["B"]], dry_run=True)
+    changed = {**original, "k1": binding([AUTH["A"]], fallback=True)}
+    batch(["k1"], {"k1": original["k1"]}, {"k1": changed["k1"]}, codex_fallback=True)
+    status, response = mgmt("POST", BASE + "/keys/codex-binding/batch", {
+        "ids": selected, "accounts_mode": "set", "codex_auth_ids": [AUTH["B"]], "expected": stale})
+    check(status == 409, f"stale preview apply is rejected: HTTP {status} {response}")
+    check(bindings(selected) == changed, "conflicting apply leaves both bindings untouched")
+    routes_unchanged()
+    batch(["k1"], {"k1": changed["k1"]}, {"k1": original["k1"]}, codex_fallback=False)
 
     # ---------------------------------------------------------------- 4
     section("4 session affinity")
@@ -358,16 +616,60 @@ def main() -> int:
         a = run("sk-plus-noalias-0002", 2, "renamed key")
         check(a and all(x == "B" for x in a), f"renamed key still on B: {a}")
 
+    section("10 OpenAI compatibility native pass-through")
+    for key in (ROUTING_KEY, UNBOUND_KEY):
+        provider_case(key, "e2e-openai", "openai", "openai-native", "e2e-openai-native")
+    section("10 Claude OAuth native pass-through & alias")
+    for key in (ROUTING_KEY, UNBOUND_KEY):
+        provider_case(key, "e2e-claude", "claude", "claude-native", "claude-sonnet-4-5-20250929")
+    section("10 Gemini API-key native pass-through & alias")
+    for key in (ROUTING_KEY, UNBOUND_KEY):
+        provider_case(key, "e2e-gemini", "gemini", "gemini-native", "gemini-2.5-flash")
+
+    section("11 Codex OAuth alias & payload override")
+    for kind in ("chat", "responses"):
+        before = len(calls())
+        status, payload, account = send(ROUTING_KEY, kind=kind, model="e2e-codex-alias", extra={HEADER: "forged-client-value"})
+        recorded = calls()[before:]
+        check(status == 200 and account == "A", f"bound key {kind} Codex alias retains A allocation: HTTP {status} {account}")
+        check(len(recorded) == 1 and recorded[0].get("provider") == "codex" and recorded[0].get("model") == MODEL,
+              f"host resolves Codex alias to native model {MODEL}: {[r.get('model') for r in recorded]}")
+        check(bool(recorded) and all(HEADER.lower() not in row["header_names"] for row in recorded),
+              f"Codex alias {kind} never forwards internal binding header")
+    for key in (ROUTING_KEY, UNBOUND_KEY):
+        before = len(calls())
+        status, payload, account = send(key, extra={HEADER: "forged-client-value"})
+        recorded = calls()[before:]
+        check(status == 200 and account in (("A",) if key == ROUTING_KEY else ("A", "B")),
+              f"{key} Codex payload override request routes normally: HTTP {status} {account}")
+        check(len(recorded) == 1 and recorded[0].get("body", {}).get("metadata", {}).get("e2e_payload") == "codex-override",
+              f"{key} upstream receives native host payload override: {[r.get('body', {}).get('metadata') for r in recorded]}")
+        check(bool(recorded) and all(HEADER.lower() not in row["header_names"] for row in recorded),
+              f"Codex payload override request clears internal header for {key}")
+
+    # Last traffic-changing scenario: the released retry cannot affect earlier routing/quota assertions.
+    inflight_case()
+
     # ---------------------------------------------------------------- final
     section("final")
     leaked = [x["n"] for x in calls() if HEADER.lower() in x["header_names"]]
     check(not leaked, f"final: none of {len(calls())} upstream calls carried {HEADER}")
-    check(pick_count() > picks1, f"pick count still growing: {pick_count()}")
+    picks_final, _ = observed_picks()
+    check(picks_final > picks1, f"pick count still growing: {picks1} -> {picks_final}")
     by_acct = {}
     for x in calls():
         by_acct[x["account"]] = by_acct.get(x["account"], 0) + 1
     print(f"upstream calls by account: {by_acct}", flush=True)
+    for provider in ("codex", "openai", "claude", "gemini"):
+        provider_calls = [row for row in calls() if row.get("provider") == provider]
+        leaked = [row["n"] for row in provider_calls if HEADER.lower() in row["header_names"]]
+        check(bool(provider_calls) and not leaked,
+              f"final {provider}: {len(provider_calls)} observed upstream calls, binding-header leaks={leaked}")
 
+    return report()
+
+
+def report():
     print("\n---- summary ----", flush=True)
     sections = {}
     for sec, ok, _ in results:
@@ -377,9 +679,15 @@ def main() -> int:
     failed = [r for r in results if not r[1]]
     for sec, _, msg in failed:
         print(f" - [{sec}] {msg}", flush=True)
+    print(f"checks: {len(results) - len(failed)}/{len(results)} passed; {len(failed)} failed", flush=True)
     print("all codex e2e checks passed" if not failed else f"{len(failed)} checks failed", flush=True)
     return 1 if failed else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        code = main()
+    except (Exception, SystemExit) as exc:
+        check(False, f"scenario aborted: {type(exc).__name__}: {exc}")
+        code = report()
+    sys.exit(code)

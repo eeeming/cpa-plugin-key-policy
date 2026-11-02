@@ -1,0 +1,10 @@
+{
+  "type": "claude",
+  "email": "claude-a@e2e.test",
+  "account_uuid": "00000000-0000-4000-8000-00000000000c",
+  "access_token": "tok-claude-a",
+  "refresh_token": "rt-claude-a",
+  "id_token": "",
+  "last_refresh": "2026-11-01T00:00:00Z",
+  "expired": "2099-01-01T00:00:00Z"
+}

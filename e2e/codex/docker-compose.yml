@@ -1,9 +1,9 @@
 name: cpa-key-quota-codex-e2e
 
-# CPA (eceasy/cli-proxy-api:latest) + CPA-Manager-Plus v1.13.1 + a mock
-# ChatGPT Codex backend. Two real Codex OAuth auth files (A, B) point at the
-# real executor path; the mock answers as chatgpt.com via a network alias and
-# a throwaway CA that only this CPA container trusts (SSL_CERT_FILE).
+# CPA (eceasy/cli-proxy-api:latest) + CPA-Manager-Plus v1.13.1 + local
+# Codex, OpenAI-compatible, Claude, and Gemini backends. OAuth and API-key
+# credentials exercise real native executors; TLS provider hosts use mock network
+# aliases and a throwaway CA that only this CPA container trusts (SSL_CERT_FILE).
 
 services:
   builder:
@@ -36,6 +36,7 @@ services:
         aliases:
           - chatgpt.com
           - auth.openai.com
+          - api.anthropic.com
     expose:
       - "443"
       - "8080"

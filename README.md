@@ -149,7 +149,7 @@ An existing key is renamed only when its name still equals its masked `key_previ
 
 The response includes `added`, `skipped`, `renamed`, `total`, and optional `added_ids` / `renamed_ids`. `skipped` still counts all already-bound keys, including those in `renamed`. An unavailable/older alias endpoint or invalid alias response does not fail sync: keys import without aliases, and safe `warnings` plus a UI notice diagnose the degraded lookup without exposing upstream URLs, response bodies or plaintext keys.
 
-Disable (`enabled: false`) pauses quota and Codex binding for **new** requests; the Plus key still works. Unbind removes the policy only. Existing admitted requests retain their signed allocation. Deleting the key from Plus `api-keys` is what produces 401.
+Disable (`enabled: false`) pauses quota and Codex binding for **new** requests; the Plus key still works. **Remove plugin policy** (formerly **Unbind**) deletes that key's plugin quota/Codex policy, not its Plus API key. **Clear Codex binding** only clears the allocation and keeps the policy and limits. Existing admitted requests retain their signed allocation. Deleting the key from Plus `api-keys` is what produces 401.
 
 **Inspect and reset:** `GET /v0/management/plugins/cpa-key-quota/keys/usage?id=<id>` returns one key's 24h/7d USD, call counts, window start/reset times, and the per-model breakdown the card shows. `POST /v0/management/plugins/cpa-key-quota/keys/reset-windows` with `{"ids":["k-a","k-b"]}` zeroes the rolling 24h/7d usage and the RPM minute bucket for those keys; limit numbers, names, and enabled flags are unchanged, and Plus usage is not touched. Unknown ids are reported in `failed`.
 
@@ -185,9 +185,42 @@ Session identity prefers host `Options.Metadata.canonical_session_id` (already d
 
 **Account directory:** `GET /v0/management/plugins/cpa-key-quota/codex-auths` returns `available`, `source`, `accounts`, and `diagnostics`. It uses `host.auth.list`, plus a bounded 1024-entry recent-candidate cache. Entries expose only `id/label/name/email/status/disabled/unavailable/priority/source`, not paths, tokens or raw credentials. Host failures produce `available:false`; recent observations are explicitly incomplete. Previously seen IDs missing from a successful host directory are unavailable, and the UI retains selected missing IDs as invalid rather than silently clearing restrictions. Manual AuthIDs work without a directory; separate them with newlines, commas or semicolons (spaces inside IDs are preserved).
 
-**Diagnostics:** startup logs, the directory response and the management page warn that Home bypasses binding and that this must be the highest scheduler. The current ABI cannot probe Home mode, highest effective scheduler, or whether across-priority scheduling was accepted: all three states are `unknown`, not healthy. `scheduler_pick_count` and UTC `last_scheduler_pick_at` show observed calls only; the page warns when none have been observed and offers manual refresh. There is no background polling and no plaintext key logging. Quota/RPM/free-model logic and `usage.handle` billing are unchanged. A plugin unload/fuse or host path bypass can still fall back to native scheduling: this is not a host-wide fail-closed ACL.
+**Diagnostics:** the directory response exposes only observed `scheduler_pick_count` and optional UTC `last_scheduler_pick_at`. The management page shows the timestamp in the browser's local timezone and supports manual refresh. There are no unobservable host-state probes or repeated startup warnings. These counters do not prove routing effectiveness. Quota/RPM/free-model logic and `usage.handle` billing are unchanged; plugin unload/fuse or host bypass can still fall back to native scheduling.
 
 Old version-1 state without the new fields stays unrestricted; the state version remains 1. Back up state before downgrading: an old binary can drop the new fields when saving.
+
+### Atomic batch Codex binding
+
+Select keys and choose **Bind Codex**. The dialog requests a server preview of each stable key ID's before/after accounts, group and fallback; only an explicit confirmation applies it. Editing the form invalidates the preview. This is not a reverse account-to-key view.
+
+`POST /v0/management/plugins/cpa-key-quota/keys/codex-binding/batch` uses CPA management authentication:
+
+```json
+{"ids":["k-a","k-b"],"accounts_mode":"add","codex_auth_ids":["codex-b.json"],"dry_run":true}
+```
+
+Preview response (no state or disk changes):
+
+```json
+{"dry_run":true,"updated":0,"changes":[{"id":"k-a","before":{"codex_auth_ids":["codex-a.json"],"codex_group":"","codex_fallback":false},"after":{"codex_auth_ids":["codex-a.json","codex-b.json"],"codex_group":"","codex_fallback":false}},{"id":"k-b","before":{"codex_auth_ids":[],"codex_group":"","codex_fallback":false},"after":{"codex_auth_ids":["codex-b.json"],"codex_group":"","codex_fallback":false}}]}
+```
+
+To apply, send the same operation with `dry_run:false` and `expected:[{"id":...,"before":...}]` copied from every preview row. Success returns the same `changes` shape and `updated` equal to the selected count. Direct API clients may omit `expected`; the UI always uses it.
+
+| Request field | Semantics |
+|---|---|
+| `ids` | Nonempty exact policy IDs; duplicates, blank IDs and unknown policies reject the entire batch |
+| `accounts_mode` | `keep` (default), `set`, `add` (union), or `remove` (difference) |
+| `codex_auth_ids` | Required for set/add/remove; set `[]` clears IDs only; add/remove need nonblank IDs; normalization matches single PATCH |
+| `codex_group` | Omitted keeps each group; `""` clears it; otherwise trimmed/lowercased |
+| `codex_fallback` | Omitted keeps each value; explicit `true`/`false` sets it |
+| `clear:true` | Clears accounts, group and fallback; cannot combine with other binding operation fields |
+| `dry_run:true` | Validates and previews the whole batch without writes |
+| `expected` | Optional complete before-bindings for all selected IDs; stale values return 409 |
+
+Malformed input/unknown fields return 400, unknown policies 404, stale previews 409, and persistence failures 500. Every failure leaves all bindings and the prior state file unchanged. A successful apply saves one staged state atomically before publishing the complete binding update. Names, hashes, enabled state, quota/RPM limits and usage are not modified. New requests use the new allocation; admitted requests and credential retries keep their signed snapshots.
+
+Purely non-Codex routes return `Handled:false` before snapshot validation and retain native host scheduling, including for keys with a Codex binding. Codex-inclusive mixed routes retain the existing strict Codex binding behavior. Host OAuth model aliases and payload rules remain native host features.
 
 
 ## Rolling windows

@@ -16,11 +16,13 @@ export default function CodexBindingFields({
   manualText,
   onChange,
   onManualText,
+  accountsOnly = false,
 }: {
   value: CodexBindingValue;
   manualText: string;
   onChange: (value: CodexBindingValue) => void;
   onManualText: (text: string) => void;
+  accountsOnly?: boolean;
 }) {
   const t = useT();
   const id = useId();
@@ -119,6 +121,7 @@ export default function CodexBindingFields({
           {t("codex.addManual")}
         </button>
       </div>
+      {!accountsOnly && <>
       <div className="form-row">
         <label htmlFor={`${id}-group`}>{t("codex.group")}</label>
         <input
@@ -141,6 +144,7 @@ export default function CodexBindingFields({
         {t("codex.fallback")}
       </label>
       <p className="muted codex-hint" id={`${id}-fallback-hint`}>{t("codex.fallbackHint")}</p>
+      </>}
     </fieldset>
   );
 }

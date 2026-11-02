@@ -170,7 +170,7 @@ func TestBindingRejectsInvalidSignedPayloads(t *testing.T) {
 	}
 	for name, payload := range cases {
 		t.Run(name, func(t *testing.T) {
-			req := SchedulerPickRequest{Options: SchedulerOptions{Headers: map[string][]string{bindingHeader: {bindingTestRawToken(s, payload)}}}}
+			req := SchedulerPickRequest{Provider: "codex", Options: SchedulerOptions{Headers: map[string][]string{bindingHeader: {bindingTestRawToken(s, payload)}}}}
 			envelope, _ := bindingTestPick(t, s, req)
 			bindingTestError(t, envelope, "codex_binding_invalid", http.StatusForbidden)
 		})

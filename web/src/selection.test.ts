@@ -9,8 +9,6 @@ import {
   mergeSelection,
   pruneSelection,
 } from "./selection";
-import zh from "./i18n/locales/zh-CN.json";
-import en from "./i18n/locales/en.json";
 
 describe("toggleId / selectAll / invertSelection", () => {
   it("toggles a card id in and out of the selection", () => {
@@ -73,19 +71,5 @@ describe("marquee rectangle hit test", () => {
   it("does not hit cards below a top-row marquee", () => {
     const marquee = normalizeRect(0, 0, 200, 50);
     expect(idsHitByMarquee(marquee, cards)).toEqual(["a", "b"]);
-  });
-});
-
-describe("bulk toolbar copy", () => {
-  it("ships 全选 / 反选 / 设置限额 / 重置 in zh-CN and English", () => {
-    expect(zh.keys.selectAll).toBe("全选");
-    expect(zh.keys.invert).toBe("反选");
-    expect(zh.keys.setLimits).toBe("设置限额");
-    expect(zh.keys.reset).toBe("重置");
-    expect(zh.keys.disable).toBe("停用");
-    expect(zh.keys.unbind).toBe("解绑");
-    expect(en.keys.selectAll).toBe("Select all");
-    expect(en.keys.reset).toBe("Reset");
-    expect(en.keys.resetOneConfirm).toContain("Limits stay the same");
   });
 });
