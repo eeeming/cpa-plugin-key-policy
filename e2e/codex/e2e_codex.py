@@ -341,6 +341,22 @@ def main() -> int:
         check(status == 200, f"re-sync: {status} {res}")
         a = run("sk-plus-alias-0001", 2, "aliased after re-sync")
         check(a and all(x == "A" for x in a), f"binding survives re-sync: {a}")
+        # Alias added later in Plus: an auto-named key picks it up, binding kept.
+        noalias_hash = hashlib.sha256(b"sk-plus-noalias-0002").hexdigest()
+        status, _ = plus("PUT", "/v0/management/api-key-aliases", {"items": [
+            {"apiKeyHash": alias_hash, "alias": "bob-team"}, {"apiKeyHash": noalias_hash, "alias": "carol-late"},
+            {"apiKeyHash": hashlib.sha256(b"sk-k1").hexdigest(), "alias": "alice-plus"}]})
+        check(status == 200, f"Plus alias carol-late added later: {status}")
+        status, res = mgmt("POST", BASE + "/keys/sync")
+        check(status == 200, f"re-sync after late alias: {status} {res}")
+        status, keys = mgmt("GET", BASE + "/keys")
+        rows = {r["id"]: r for r in ((keys.get("keys") if isinstance(keys, dict) else keys) or [])}
+        late = rows.get(noalias_row["id"], {})
+        check(late.get("name") == "carol-late", f"auto-named key renamed from late Plus alias: {late.get('name')!r}")
+        check(late.get("codex_auth_ids") == [AUTH["B"]], f"binding kept after rename: {late.get('codex_auth_ids')}")
+        check(rows.get("k1", {}).get("name") == "k1", f"custom name k1 not overwritten: {rows.get('k1', {}).get('name')!r}")
+        a = run("sk-plus-noalias-0002", 2, "renamed key")
+        check(a and all(x == "B" for x in a), f"renamed key still on B: {a}")
 
     # ---------------------------------------------------------------- final
     section("final")
