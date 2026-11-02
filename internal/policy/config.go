@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,9 +32,17 @@ type KeyConfig struct {
 	RPM            int       `yaml:"rpm" json:"rpm"`
 	DailyLimitUSD  float64   `yaml:"daily_limit_usd,omitempty" json:"daily_limit_usd,omitempty"`
 	WeeklyLimitUSD float64   `yaml:"weekly_limit_usd,omitempty" json:"weekly_limit_usd,omitempty"`
+	CodexAuthIDs   []string  `yaml:"codex_auth_ids,omitempty" json:"codex_auth_ids,omitempty"`
+	CodexGroup     string    `yaml:"codex_group,omitempty" json:"codex_group,omitempty"`
+	CodexFallback  bool      `yaml:"codex_fallback,omitempty" json:"codex_fallback,omitempty"`
 	CreatedAt      time.Time `yaml:"created_at,omitempty" json:"created_at,omitempty"`
 	UpdatedAt      time.Time `yaml:"updated_at,omitempty" json:"updated_at,omitempty"`
 	LastAccessAt   time.Time `yaml:"last_access_at,omitempty" json:"last_access_at,omitempty"`
+}
+
+func cloneKey(key KeyConfig) KeyConfig {
+	key.CodexAuthIDs = slices.Clone(key.CodexAuthIDs)
+	return key
 }
 
 type UsageState struct {
@@ -136,6 +145,15 @@ func normalizeConfig(cfg *Config) error {
 		key.KeyHash = strings.TrimSpace(key.KeyHash)
 		key.KeyPreview = strings.TrimSpace(key.KeyPreview)
 		key.CallerScope = strings.TrimSpace(key.CallerScope)
+		ids := make([]string, 0, len(key.CodexAuthIDs))
+		for _, id := range key.CodexAuthIDs {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+		}
+		slices.Sort(ids)
+		key.CodexAuthIDs = slices.Compact(ids)
+		key.CodexGroup = strings.ToLower(strings.TrimSpace(key.CodexGroup))
 		if key.ID == "" {
 			return errors.New("key id is required")
 		}

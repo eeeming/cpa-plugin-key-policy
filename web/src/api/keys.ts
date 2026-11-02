@@ -1,10 +1,15 @@
 import { apiClient, pluginPath } from "./client";
-import type { KeyPublic, KeyWriteRequest, BindKeyResponse, KeyUsageResponse } from "../types";
+import type { KeyPublic, KeyWriteRequest, BindKeyResponse, KeyUsageResponse, CodexAuthListResponse } from "../types";
 
 export async function listKeys(): Promise<KeyPublic[]> {
   const c = apiClient();
   const { data } = await c.get<{ keys: KeyPublic[] }>(pluginPath("/keys"));
   return data.keys ?? [];
+}
+
+export async function listCodexAuths(): Promise<CodexAuthListResponse> {
+  const { data } = await apiClient().get<CodexAuthListResponse>(pluginPath("/codex-auths"));
+  return data;
 }
 
 export async function bindKey(req: KeyWriteRequest): Promise<BindKeyResponse> {
@@ -27,8 +32,11 @@ export async function deleteKey(id: string): Promise<void> {
 export interface SyncPlusResult {
   added: number;
   skipped: number;
+  renamed: number;
   total: number;
   added_ids?: string[];
+  renamed_ids?: string[];
+  warnings?: string[];
 }
 
 export async function syncPlusKeys(): Promise<SyncPlusResult> {

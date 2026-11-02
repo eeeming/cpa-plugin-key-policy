@@ -5,6 +5,9 @@ import { errText } from "../api/error";
 import { hasAnyLimit, limitPatch, parseLimits, type LimitInputs } from "../bulk";
 import { useT } from "../i18n";
 import KeyCard from "../components/KeyCard";
+import CodexBindingFields from "../components/CodexBindingFields";
+import SchedulerDiagnostics from "../components/SchedulerDiagnostics";
+import { codexBindingPatch, initialCodexBinding } from "../codexBinding";
 import {
   invertSelection,
   idsHitByMarquee,
@@ -102,7 +105,8 @@ export default function Policy() {
     setNotice("");
     try {
       const got = await syncPlusKeys();
-      setNotice(t("keys.syncDone", { added: got.added, skipped: got.skipped, total: got.total }));
+      const summary = t("keys.syncDone", { added: got.added, skipped: got.skipped, renamed: got.renamed, total: got.total });
+      setNotice(got.warnings?.length ? `${summary} ${t("keys.syncAliasesUnavailable")}` : summary);
       await load();
     } catch (e) {
       setError(errText(e, t("keys.syncFailed")));
@@ -281,6 +285,7 @@ export default function Policy() {
 
   return (
     <div>
+      <SchedulerDiagnostics />
       <div className="quota-toolbar">
         <div className="fp-actions">
           <button className="btn primary sm" onClick={() => setShowBind(true)}>{t("keys.bind")}</button>
@@ -510,6 +515,8 @@ function BindModal({
   const [daily, setDaily] = useState(existing ? String(existing.daily_limit_usd || "") : "");
   const [weekly, setWeekly] = useState(existing ? String(existing.weekly_limit_usd || "") : "");
   const [rpm, setRpm] = useState(existing ? String(existing.rpm || "") : "");
+  const [codex, setCodex] = useState(() => initialCodexBinding(existing));
+  const [manualAuthIds, setManualAuthIds] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   useEscape(onClose);
@@ -529,7 +536,11 @@ function BindModal({
       return;
     }
     const id = existing?.id || ("k-" + Date.now().toString(36));
-    const req: KeyWriteRequest = { ...limitPatch(id, parsed.values ?? {}), name: name.trim() || id };
+    const req: KeyWriteRequest = {
+      ...limitPatch(id, parsed.values ?? {}),
+      ...codexBindingPatch(codex, manualAuthIds),
+      name: name.trim(),
+    };
     const plain = key.trim();
     if (plain) req.key = plain;
     setBusy(true);
@@ -560,7 +571,8 @@ function BindModal({
         )}
         <div className="form-row">
           <label htmlFor="bind-name">{t("bind.name")}</label>
-          <input id="bind-name" className="input" value={name} onChange={(e) => setName(e.target.value)} />
+          <input id="bind-name" className="input" value={name} onChange={(e) => setName(e.target.value)} aria-describedby="bind-name-hint" />
+          <div className="muted codex-hint" id="bind-name-hint">{t("bind.nameHint")}</div>
         </div>
         <div className="form-row">
           <label htmlFor="bind-key">{existing ? t("bind.keyRotate") : t("bind.key")}</label>
@@ -586,6 +598,12 @@ function BindModal({
           onDaily={setDaily}
           onWeekly={setWeekly}
           onRpm={setRpm}
+        />
+        <CodexBindingFields
+          value={codex}
+          manualText={manualAuthIds}
+          onChange={setCodex}
+          onManualText={setManualAuthIds}
         />
         {err && <div className="error" role="alert">{err}</div>}
         <div className="fp-actions" style={{ marginTop: 12 }}>

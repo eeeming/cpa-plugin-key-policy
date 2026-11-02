@@ -35,10 +35,28 @@ typedef struct {
 extern int cliproxyPluginCall(char*, uint8_t*, size_t, cliproxy_buffer*);
 extern void cliproxyPluginFree(void*, size_t);
 extern void cliproxyPluginShutdown(void);
+
+static int call_host_auth_list(const cliproxy_host_api* host, cliproxy_buffer* response) {
+	if (host == NULL || host->call == NULL || host->free_buffer == NULL) {
+		return 1;
+	}
+	static const char method[] = "host.auth.list";
+	static const uint8_t request[] = "{}";
+	return host->call(host->host_ctx, method, request, sizeof(request) - 1, response);
+}
+
+static void free_host_buffer(const cliproxy_host_api* host, void* ptr, size_t len) {
+	if (host != NULL && host->free_buffer != NULL && ptr != NULL) {
+		host->free_buffer(ptr, len);
+	}
+}
 */
 import "C"
 
 import (
+	"encoding/json"
+	"errors"
+	"sync"
 	"unsafe"
 
 	"cpa-key-policy/internal/plugin"
@@ -46,11 +64,21 @@ import (
 
 var app = plugin.NewApp()
 
+var hostAPIMu sync.RWMutex
+var hostAPI C.cliproxy_host_api
+
 func main() {}
 
 //export cliproxy_plugin_init
 func cliproxy_plugin_init(host *C.cliproxy_host_api, api *C.cliproxy_plugin_api) C.int {
-	_ = host
+	hostAPIMu.Lock()
+	if host == nil {
+		hostAPI = C.cliproxy_host_api{}
+	} else {
+		hostAPI = *host
+	}
+	hostAPIMu.Unlock()
+	app.SetAuthFileLister(listHostAuthFiles)
 	if api == nil {
 		return 1
 	}
@@ -106,4 +134,35 @@ func writeResponse(response *C.cliproxy_buffer, raw []byte) {
 	}
 	response.ptr = ptr
 	response.len = C.size_t(len(raw))
+}
+
+func listHostAuthFiles() ([]plugin.HostAuthFile, error) {
+	hostAPIMu.RLock()
+	host := hostAPI
+	hostAPIMu.RUnlock()
+	var response C.cliproxy_buffer
+	code := C.call_host_auth_list(&host, &response)
+	if response.ptr != nil {
+		defer C.free_host_buffer(&host, response.ptr, response.len)
+	}
+	if code != 0 {
+		return nil, errors.New("host.auth.list callback failed or is unsupported")
+	}
+	if response.ptr == nil || response.len == 0 || uint64(response.len) > uint64(1<<31-1) {
+		return nil, errors.New("host.auth.list returned an invalid buffer")
+	}
+	// Go owns this copy; the deferred trampoline releases the original through
+	// the host allocator, never through the plugin's C.free.
+	raw := C.GoBytes(response.ptr, C.int(response.len))
+	var envelope plugin.Envelope
+	if err := json.Unmarshal(raw, &envelope); err != nil || !envelope.OK {
+		return nil, errors.New("host.auth.list returned an invalid or unsuccessful envelope")
+	}
+	var result struct {
+		Files *[]plugin.HostAuthFile `json:"files"`
+	}
+	if err := json.Unmarshal(envelope.Result, &result); err != nil || result.Files == nil {
+		return nil, errors.New("host.auth.list returned an invalid directory")
+	}
+	return *result.Files, nil
 }

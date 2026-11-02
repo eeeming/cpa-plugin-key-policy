@@ -13,6 +13,9 @@ plugins:
   configs:
     cpa-key-quota:
       enabled: true
+      # 10 is enough when no other scheduler plugin is installed. CPA invokes
+      # only the highest-priority scheduler; provider-only plugins do not compete.
+      # Home dispatch bypasses plugin schedulers: keep Home disabled for binding.
       priority: 10
       # Bound policies + usage. Created if missing. Keep this file private.
       state_file: "cpa-key-quota-state.json"
@@ -25,3 +28,8 @@ plugins:
       plus_management_key: "replace-with-manager-plus-admin-key"
       # Optional seed. Ignored once state_file exists.
       # keys: []
+      # Per-key fields in keys[] / the management /keys API (not global options):
+      # codex_auth_ids: ["codex-auth-record-id"]
+      # codex_group: ""         # optional plan_type/tier, AND with the IDs
+      # codex_fallback: false   # no match => 503; true may use other Codex accounts
+      # Multiple accounts retain session affinity; no session => round-robin.

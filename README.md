@@ -15,6 +15,7 @@ It does **not** issue keys and does **not** replace Plus authentication. You bin
 - CLIProxyAPI v7 plugin host that can `dlopen` a c-shared `.so`. Use a glibc image such as `eceasy/cli-proxy-api`. Alpine / `CGO_ENABLED=0` hosts cannot load this plugin.
 - Linux `amd64` or `arm64` matching the CPA host (`CGO_ENABLED=1`).
 - **CPA-Manager-Plus** for USD limits. The plugin reads Plus `GET /v0/management/model-prices` and bills with those rates. RPM still works if Plus is missing.
+- Codex binding additionally requires a host supporting `scheduler.pick` and `scheduler_across_priorities`; account listing uses the optional `host.auth.list` callback. ABI version 1 alone does not prove those capabilities are supported.
 
 Do **not** declare `frontend_auth_provider`. Over-quota must `Terminate` with 429, not `Authenticated: false`.
 
@@ -57,7 +58,7 @@ ARM hosts: `plugins/linux/arm64/cpa-key-quota.so`.
 
 ### 3. Point the plugin at CPA-Manager-Plus
 
-Add the snippet in [Configure](#configure) to CPA `config.yaml`. `plus_base_url` must be the Plus base URL **as the CPA container sees it** (Docker DNS, not a public hostname), for example `http://cpa-manager-plus:18317`. `plus_management_key` is the **Plus admin key** (`CPA_MANAGER_ADMIN_KEY`), used to read the price table and, for **Sync**, Plus `api-keys`. It is not the CPA `remote-management.secret-key`.
+Add the snippet in [Configure](#configure) to CPA `config.yaml`. `plus_base_url` must be the Plus base URL **as the CPA container sees it** (Docker DNS, not a public hostname), for example `http://cpa-manager-plus:18317`. `plus_management_key` is the **Plus admin key** (`CPA_MANAGER_ADMIN_KEY`), used to read the price table and, for **Sync**, Plus `api-keys` and optional `api-key-aliases`. It is not the CPA `remote-management.secret-key`.
 
 USD limits do not work until this is set and Plus has model prices. See [Prices](#prices).
 
@@ -116,12 +117,14 @@ plugins:
       plus_management_key: "your-plus-admin-key"
 ```
 
+`priority: 10` is sufficient when this is the only scheduler plugin; provider-only plugins do not compete. CPA calls **one** scheduler: the highest plugin priority, with plugin ID ordering breaking ties. If another scheduler is installed, make this plugin the highest. A scheduler returning `Handled:false` falls back to CPA's native selector, not the next plugin. **Home dispatch bypasses plugin schedulers**; keep Home disabled for these bindings. Neither a higher priority nor an observed pick count proves Home/host capability acceptance.
+
 | Field | Purpose |
 |---|---|
 | `enabled` | Pause the plugin without unloading it |
 | `state_file` | JSON file for bound policies and usage (created if missing; chmod 600) |
 | `plus_base_url` | CPA-Manager-Plus base URL (Docker-internal recommended). See [Prices](#prices) |
-| `plus_management_key` | Plus admin Bearer for the price API and for **Sync** (`GET /v0/management/api-keys`) |
+| `plus_management_key` | Plus admin Bearer for the price API and **Sync** (`GET /v0/management/api-keys` and optional `GET /v0/management/api-key-aliases`) |
 | `keys` | Optional seed list. After the state file exists, the file wins |
 
 Usage is kept in memory and flushed to the state file about every 15s (atomic temp + rename).
@@ -140,11 +143,52 @@ Content-Type: application/json
 
 `0` on a limit means unlimited. PATCH the same path to edit limits, rename, enable/disable, or rotate the key (new plaintext, hashed immediately).
 
-**Sync from Plus** (**Sync**): `POST /v0/management/plugins/cpa-key-quota/keys/sync` fetches Plus `GET /v0/management/api-keys` and binds keys that are not already hashed in the plugin. Existing names/limits/enabled flags are not overwritten. New keys start enabled with unlimited USD/RPM. Plus currently returns a plaintext string list **without display names**, so synced names default to the preview; rename in **Edit**.
+**Sync from Plus** (**Sync**): `POST /v0/management/plugins/cpa-key-quota/keys/sync` fetches Plus `GET /v0/management/api-keys` and optional `GET /v0/management/api-key-aliases` with the same admin Bearer. Aliases are matched by lowercase SHA-256 hex of the plaintext key, without the `sha256:` prefix. New keys use the Plus alias when present; otherwise named entries keep their supplied name and string-only entries use a masked preview. New keys start enabled with unlimited USD/RPM.
 
-Disable (`enabled: false`) pauses quota for that key; the Plus key still works. Unbind removes the policy only. Deleting the key from Plus `api-keys` is what produces 401.
+An existing key is renamed only when its name still equals its masked `key_preview` and a Plus alias is available. Custom names, limits, enabled flags and Codex bindings are preserved. Alias removal does not reset a name. Identity still uses the key hash/caller scope; edits address the stable policy `id`, never the display name.
+
+The response includes `added`, `skipped`, `renamed`, `total`, and optional `added_ids` / `renamed_ids`. `skipped` still counts all already-bound keys, including those in `renamed`. An unavailable/older alias endpoint or invalid alias response does not fail sync: keys import without aliases, and safe `warnings` plus a UI notice diagnose the degraded lookup without exposing upstream URLs, response bodies or plaintext keys.
+
+Disable (`enabled: false`) pauses quota and Codex binding for **new** requests; the Plus key still works. Unbind removes the policy only. Existing admitted requests retain their signed allocation. Deleting the key from Plus `api-keys` is what produces 401.
 
 **Inspect and reset:** `GET /v0/management/plugins/cpa-key-quota/keys/usage?id=<id>` returns one key's 24h/7d USD, call counts, window start/reset times, and the per-model breakdown the card shows. `POST /v0/management/plugins/cpa-key-quota/keys/reset-windows` with `{"ids":["k-a","k-b"]}` zeroes the rolling 24h/7d usage and the RPM minute bucket for those keys; limit numbers, names, and enabled flags are unchanged, and Plus usage is not touched. Unknown ids are reported in `failed`.
+
+## Bind upstream Codex accounts
+
+Edit a key to choose multiple accounts, search ID/email/label/status, enter AuthIDs manually, optionally filter a group, or explicitly allow fallback. The card shows its binding. Names are display-only: missing names use a masked key preview, and renaming does not lose the allocation. Do not paste downstream keys as AuthIDs; use the host auth record's `id`, not `auth_index`, email, or OAuth account ID.
+
+The existing `/keys` GET/POST/PATCH API supports these per-key fields, also stored in state `keys[]`:
+
+| Field | Behavior |
+|---|---|
+| `codex_auth_ids` | AuthID allowlist; trimmed, deduplicated, case-sensitive. Empty adds no ID filter. |
+| `codex_group` | Optional `plan_type`, falling back to `tier` when absent. Trimmed/lowercased; AND with the ID filter. |
+| `codex_fallback` | Default `false`: no matching account returns HTTP 503, code `codex_binding_unavailable`. Explicit `true` permits other available Codex accounts only when the binding has no match. No cross-provider fallback. |
+
+Both IDs and group empty means unrestricted: `Handled:false` preserves CPA's native scheduling/session affinity. A binding never selects credentials outside the host's available candidates, including during cooldown, disablement, model mismatch, or credential retries. To clear it, PATCH an empty array/group and `false` explicitly; omitted fields stay unchanged:
+
+```http
+PATCH /v0/management/plugins/cpa-key-quota/keys
+Authorization: Bearer <CPA remote-management secret-key>
+Content-Type: application/json
+
+{"id":"k-team","codex_auth_ids":["codex-auth-record-id"],"codex_group":"","codex_fallback":false}
+```
+
+**Session affinity:** a single configured account is selected directly. With multiple accounts, the same visible session stays on an allowed candidate, even if a higher-priority allowed account recovers. If it disappears from the current candidates, selection rebinds within the permitted set. Cold sessions and requests without a session round-robin in stable AuthID order within the highest permitted priority tier. The plugin declares `scheduler_across_priorities=true` so a lower-priority allowlisted account is not hidden by an unrelated account.
+
+Session identity prefers host `Options.Metadata.canonical_session_id` (already derived from headers/body), then host-compatible session headers, then `execution_session_id`, `lcp_affinity_session_id`, and `derived_session_id`. Header extraction includes Claude/Codex session/agent/thread identities and generic session/affinity/slot/conversation/client-request headers. The scheduler ABI has no body, so body-only identity depends on host enrichment; it does not reparse interceptor bodies or reproduce the host's full LCP/fork-parent cache. Affinity stores only a SHA-256 session identity, isolated by key fingerprint, signed allocation, provider and model: at most 4096 entries, one-hour sliding TTL, lazy expiry/FIFO capacity eviction. New allocations get isolated affinity; old in-flight requests cannot overwrite their bindings. Round-robin pools are separately capped at 4096.
+
+**Allocation changes:** every admission uses the latest published in-memory policy, with no long-lived policy cache or second lookup after quota checks. Only admitted requests receive `X-Cpa-Key-Quota-Binding`: a versioned, HMAC-SHA256 signed snapshot containing the irreversible key identity, allowed AuthIDs, group/fallback and restriction flag. It contains no downstream plaintext or display name. PATCH/reconfigure do not rotate the process signing key. Every pick, including a credential retry, uses that snapshot and never reads live policy; new requests see the change immediately while old requests finish under the old allocation. Client copies of the header are cleared/replaced; missing means native delegation, invalid signatures return `codex_binding_invalid`/403. `request.intercept_after` clears the internal header before execution. Process/plugin reload creates a new signing key and is not an in-flight continuation guarantee.
+
+**Scheduler error bodies:** the ABI error message carries a complete OpenAI-style JSON body so CPA preserves `codex_binding_unavailable` / `server_error` (503) and `codex_binding_invalid` / `permission_error` (403), rather than replacing their codes. Non-streaming and pre-first-frame streaming failures retain the HTTP status. After SSE is committed, error events retain the error details but cannot change the already-sent HTTP status.
+
+**Account directory:** `GET /v0/management/plugins/cpa-key-quota/codex-auths` returns `available`, `source`, `accounts`, and `diagnostics`. It uses `host.auth.list`, plus a bounded 1024-entry recent-candidate cache. Entries expose only `id/label/name/email/status/disabled/unavailable/priority/source`, not paths, tokens or raw credentials. Host failures produce `available:false`; recent observations are explicitly incomplete. Previously seen IDs missing from a successful host directory are unavailable, and the UI retains selected missing IDs as invalid rather than silently clearing restrictions. Manual AuthIDs work without a directory; separate them with newlines, commas or semicolons (spaces inside IDs are preserved).
+
+**Diagnostics:** startup logs, the directory response and the management page warn that Home bypasses binding and that this must be the highest scheduler. The current ABI cannot probe Home mode, highest effective scheduler, or whether across-priority scheduling was accepted: all three states are `unknown`, not healthy. `scheduler_pick_count` and UTC `last_scheduler_pick_at` show observed calls only; the page warns when none have been observed and offers manual refresh. There is no background polling and no plaintext key logging. Quota/RPM/free-model logic and `usage.handle` billing are unchanged. A plugin unload/fuse or host path bypass can still fall back to native scheduling: this is not a host-wide fail-closed ACL.
+
+Old version-1 state without the new fields stays unrestricted; the state version remains 1. Back up state before downgrading: an old binary can drop the new fields when saving.
+
 
 ## Rolling windows
 
