@@ -207,11 +207,8 @@ func TestCodexCatalogConcurrentInjectionAndObservation(t *testing.T) {
 func TestCodexCatalogDiagnosticsObserveEverySchedulerPick(t *testing.T) {
 	catalog := newCodexCatalog()
 	initial := catalog.list().Diagnostics
-	if initial.HomeMode != "unknown" || initial.HighestPriorityScheduler != "unknown" || initial.SchedulerAcrossPriorities != "unknown" || initial.SchedulerPickCount != 0 || initial.LastSchedulerPickAt != "" {
+	if initial.SchedulerPickCount != 0 || initial.LastSchedulerPickAt != "" {
 		t.Fatalf("unobserved scheduler diagnostics = %+v", initial)
-	}
-	if initial.Warning != "Home 模式下插件 scheduler 会被绕过，绑定不生效；需确保本插件为最高 priority scheduler" {
-		t.Fatalf("missing routing-effectiveness warning: %q", initial.Warning)
 	}
 	initialJSON, err := json.Marshal(initial)
 	if err != nil {
@@ -243,9 +240,6 @@ func TestCodexCatalogDiagnosticsObserveEverySchedulerPick(t *testing.T) {
 	finalTime, err := time.Parse(time.RFC3339Nano, final.LastSchedulerPickAt)
 	if err != nil || !strings.HasSuffix(final.LastSchedulerPickAt, "Z") || finalTime.Before(last) {
 		t.Fatalf("last-pick time did not advance correctly: %+v (%v)", final, err)
-	}
-	if final.HomeMode != "unknown" || final.HighestPriorityScheduler != "unknown" || final.SchedulerAcrossPriorities != "unknown" || final.Warning != initial.Warning {
-		t.Fatalf("observed picks must not claim routing effectiveness: %+v", final)
 	}
 	if got := catalog.list().Diagnostics; got != final {
 		t.Fatalf("reading the directory changed scheduler diagnostics: before=%+v after=%+v", final, got)

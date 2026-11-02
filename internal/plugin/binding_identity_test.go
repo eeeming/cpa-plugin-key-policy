@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
-	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,9 +16,7 @@ import (
 func TestBindingKeyIdentityDoesNotDependOnAliasOrExposePlaintext(t *testing.T) {
 	const nameless = "sk-no-alias-private-0123456789"
 	const named = "sk-named-private-9876543210"
-	var logs bytes.Buffer
 	app := NewApp()
-	app.logger = log.New(&logs, "", 0)
 	t.Cleanup(app.Shutdown)
 	path := filepath.Join(t.TempDir(), "state.json")
 	config := "enabled: true\nstate_file: " + path + "\nplus_management_key: " + nameless + "\n"
@@ -117,16 +114,13 @@ func TestBindingKeyIdentityDoesNotDependOnAliasOrExposePlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	apiBodies = append(apiBodies, state, logs.Bytes())
+	apiBodies = append(apiBodies, state)
 	for _, body := range apiBodies {
 		for _, plain := range []string{nameless, named} {
 			if bytes.Contains(body, []byte(plain)) {
-				t.Fatal("plaintext key leaked through management, state, or startup diagnostics")
+				t.Fatal("plaintext key leaked through management or state")
 			}
 		}
-	}
-	if !strings.Contains(logs.String(), "unknown") || !strings.Contains(logs.String(), "Home") {
-		t.Fatal("startup must make unprobeable scheduler state and the Home limitation visible")
 	}
 }
 

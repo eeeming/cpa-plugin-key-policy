@@ -10,8 +10,6 @@ import (
 
 const codexRecentLimit = 1024
 
-const codexBindingDiagnosticWarning = "Home 模式下插件 scheduler 会被绕过，绑定不生效；需确保本插件为最高 priority scheduler"
-
 // HostAuthFile is the allowlisted projection of a host.auth.list entry. Never
 // retain the host's credential JSON, file paths, or arbitrary metadata here.
 type HostAuthFile struct {
@@ -42,15 +40,10 @@ type CodexAuthAccount struct {
 	Source      string `json:"source"`
 }
 
-// BindingDiagnostics reports observed callback activity, not routing
-// effectiveness: the current host ABI cannot expose these scheduler states.
+// BindingDiagnostics reports observed scheduler callback activity only.
 type BindingDiagnostics struct {
-	HomeMode                  string `json:"home_mode"`
-	HighestPriorityScheduler  string `json:"highest_priority_scheduler"`
-	SchedulerAcrossPriorities string `json:"scheduler_across_priorities"`
-	SchedulerPickCount        uint64 `json:"scheduler_pick_count"`
-	LastSchedulerPickAt       string `json:"last_scheduler_pick_at,omitempty"`
-	Warning                   string `json:"warning"`
+	SchedulerPickCount  uint64 `json:"scheduler_pick_count"`
+	LastSchedulerPickAt string `json:"last_scheduler_pick_at,omitempty"`
 }
 
 type CodexAuthListResponse struct {
@@ -122,11 +115,7 @@ func (c *codexCatalog) list() CodexAuthListResponse {
 	c.mu.Lock()
 	lister := c.lister
 	diagnostics := BindingDiagnostics{
-		HomeMode:                  "unknown",
-		HighestPriorityScheduler:  "unknown",
-		SchedulerAcrossPriorities: "unknown",
-		SchedulerPickCount:        c.pickCount,
-		Warning:                   codexBindingDiagnosticWarning,
+		SchedulerPickCount: c.pickCount,
 	}
 	if !c.lastPick.IsZero() {
 		diagnostics.LastSchedulerPickAt = c.lastPick.Format(time.RFC3339Nano)
