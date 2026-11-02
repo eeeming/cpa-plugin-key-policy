@@ -105,7 +105,8 @@ export default function Policy() {
     setNotice("");
     try {
       const got = await syncPlusKeys();
-      setNotice(t("keys.syncDone", { added: got.added, skipped: got.skipped, total: got.total }));
+      const summary = t("keys.syncDone", { added: got.added, skipped: got.skipped, renamed: got.renamed, total: got.total });
+      setNotice(got.warnings?.length ? `${summary} ${t("keys.syncAliasesUnavailable")}` : summary);
       await load();
     } catch (e) {
       setError(errText(e, t("keys.syncFailed")));

@@ -8,7 +8,10 @@ import (
 	"time"
 )
 
-const plusAPIKeysPath = "/v0/management/api-keys"
+const (
+	plusAPIKeysPath       = "/v0/management/api-keys"
+	plusAPIKeyAliasesPath = "/v0/management/api-key-aliases"
+)
 
 // PlusAPIKey is one Plus/CPA api-keys entry. Plain is used only to compute
 // hash/preview/caller_scope and is never persisted.
@@ -20,12 +23,18 @@ type PlusAPIKey struct {
 // APIKeyLister fetches the current Plus/CPA api-keys list.
 type APIKeyLister func() ([]PlusAPIKey, error)
 
+// APIKeyAliasLister fetches aliases indexed by lowercase SHA-256 hex, without a prefix.
+type APIKeyAliasLister func() (map[string]string, error)
+
 // SyncResult is the outcome of importing Plus api-keys into the plugin.
 type SyncResult struct {
-	Added    int      `json:"added"`
-	Skipped  int      `json:"skipped"`
-	Total    int      `json:"total"`
-	AddedIDs []string `json:"added_ids,omitempty"`
+	Added      int      `json:"added"`
+	Skipped    int      `json:"skipped"`
+	Renamed    int      `json:"renamed"`
+	Total      int      `json:"total"`
+	AddedIDs   []string `json:"added_ids,omitempty"`
+	RenamedIDs []string `json:"renamed_ids,omitempty"`
+	Warnings   []string `json:"warnings,omitempty"`
 }
 
 // HTTPAPIKeyLister GETs CPA-Manager-Plus / CPA GET /v0/management/api-keys
@@ -48,6 +57,53 @@ func HTTPAPIKeyLister(client *http.Client, baseURL, managementKey string) APIKey
 			return nil, fmt.Errorf("plus api-keys: HTTP %d", code)
 		}
 		return ParsePlusAPIKeys(body)
+	}
+}
+
+// HTTPAPIKeyAliasLister fetches the optional Plus alias directory using the
+// same management credentials as the API-key list. Errors never expose URLs,
+// credentials, or response bodies.
+func HTTPAPIKeyAliasLister(client *http.Client, baseURL, managementKey string) APIKeyAliasLister {
+	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	managementKey = strings.TrimSpace(managementKey)
+	if client == nil {
+		client = &http.Client{Timeout: 15 * time.Second}
+	}
+	return func() (map[string]string, error) {
+		if baseURL == "" {
+			return nil, fmt.Errorf("plus_base_url is empty")
+		}
+		code, body, err := getPricePath(client, baseURL+plusAPIKeyAliasesPath, managementKey)
+		if err != nil {
+			return nil, fmt.Errorf("plus api-key-aliases: request failed")
+		}
+		if code < 200 || code >= 300 {
+			return nil, fmt.Errorf("plus api-key-aliases: HTTP %d", code)
+		}
+		var response struct {
+			Items *[]struct {
+				APIKeyHash string `json:"apiKeyHash"`
+				Alias      string `json:"alias"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil || response.Items == nil {
+			return nil, fmt.Errorf("plus api-key-aliases: invalid response")
+		}
+		aliases := make(map[string]string, len(*response.Items))
+		for _, item := range *response.Items {
+			if len(item.APIKeyHash) != 64 {
+				return nil, fmt.Errorf("plus api-key-aliases: invalid response")
+			}
+			for _, digit := range item.APIKeyHash {
+				if (digit < '0' || digit > '9') && (digit < 'a' || digit > 'f') {
+					return nil, fmt.Errorf("plus api-key-aliases: invalid response")
+				}
+			}
+			if alias := strings.TrimSpace(item.Alias); alias != "" {
+				aliases[item.APIKeyHash] = alias
+			}
+		}
+		return aliases, nil
 	}
 }
 

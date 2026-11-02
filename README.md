@@ -58,7 +58,7 @@ ARM hosts: `plugins/linux/arm64/cpa-key-quota.so`.
 
 ### 3. Point the plugin at CPA-Manager-Plus
 
-Add the snippet in [Configure](#configure) to CPA `config.yaml`. `plus_base_url` must be the Plus base URL **as the CPA container sees it** (Docker DNS, not a public hostname), for example `http://cpa-manager-plus:18317`. `plus_management_key` is the **Plus admin key** (`CPA_MANAGER_ADMIN_KEY`), used to read the price table and, for **Sync**, Plus `api-keys`. It is not the CPA `remote-management.secret-key`.
+Add the snippet in [Configure](#configure) to CPA `config.yaml`. `plus_base_url` must be the Plus base URL **as the CPA container sees it** (Docker DNS, not a public hostname), for example `http://cpa-manager-plus:18317`. `plus_management_key` is the **Plus admin key** (`CPA_MANAGER_ADMIN_KEY`), used to read the price table and, for **Sync**, Plus `api-keys` and optional `api-key-aliases`. It is not the CPA `remote-management.secret-key`.
 
 USD limits do not work until this is set and Plus has model prices. See [Prices](#prices).
 
@@ -124,7 +124,7 @@ plugins:
 | `enabled` | Pause the plugin without unloading it |
 | `state_file` | JSON file for bound policies and usage (created if missing; chmod 600) |
 | `plus_base_url` | CPA-Manager-Plus base URL (Docker-internal recommended). See [Prices](#prices) |
-| `plus_management_key` | Plus admin Bearer for the price API and for **Sync** (`GET /v0/management/api-keys`) |
+| `plus_management_key` | Plus admin Bearer for the price API and **Sync** (`GET /v0/management/api-keys` and optional `GET /v0/management/api-key-aliases`) |
 | `keys` | Optional seed list. After the state file exists, the file wins |
 
 Usage is kept in memory and flushed to the state file about every 15s (atomic temp + rename).
@@ -143,7 +143,11 @@ Content-Type: application/json
 
 `0` on a limit means unlimited. PATCH the same path to edit limits, rename, enable/disable, or rotate the key (new plaintext, hashed immediately).
 
-**Sync from Plus** (**Sync**): `POST /v0/management/plugins/cpa-key-quota/keys/sync` fetches Plus `GET /v0/management/api-keys` and binds keys that are not already hashed in the plugin. Existing names/limits/enabled flags/bindings are not overwritten. New keys start enabled with unlimited USD/RPM. Named entries use their supplied name; string-only entries use a masked preview. An alias is optional: identity uses the existing key hash/caller scope, and all edits address the stable policy `id`, never its display name.
+**Sync from Plus** (**Sync**): `POST /v0/management/plugins/cpa-key-quota/keys/sync` fetches Plus `GET /v0/management/api-keys` and optional `GET /v0/management/api-key-aliases` with the same admin Bearer. Aliases are matched by lowercase SHA-256 hex of the plaintext key, without the `sha256:` prefix. New keys use the Plus alias when present; otherwise named entries keep their supplied name and string-only entries use a masked preview. New keys start enabled with unlimited USD/RPM.
+
+An existing key is renamed only when its name still equals its masked `key_preview` and a Plus alias is available. Custom names, limits, enabled flags and Codex bindings are preserved. Alias removal does not reset a name. Identity still uses the key hash/caller scope; edits address the stable policy `id`, never the display name.
+
+The response includes `added`, `skipped`, `renamed`, `total`, and optional `added_ids` / `renamed_ids`. `skipped` still counts all already-bound keys, including those in `renamed`. An unavailable/older alias endpoint or invalid alias response does not fail sync: keys import without aliases, and safe `warnings` plus a UI notice diagnose the degraded lookup without exposing upstream URLs, response bodies or plaintext keys.
 
 Disable (`enabled: false`) pauses quota and Codex binding for **new** requests; the Plus key still works. Unbind removes the policy only. Existing admitted requests retain their signed allocation. Deleting the key from Plus `api-keys` is what produces 401.
 

@@ -224,7 +224,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 		Routes: []ManagementRoute{
 			{Method: http.MethodGet, Path: base + "/keys", Description: "List bound key quota policies."},
 			{Method: http.MethodPost, Path: base + "/keys", Description: "Bind an existing Plus api-key and set limits."},
-			{Method: http.MethodPost, Path: base + "/keys/sync", Description: "Import Plus api-keys that are not yet bound. Existing policies are left unchanged."},
+			{Method: http.MethodPost, Path: base + "/keys/sync", Description: "Import Plus api-keys and aliases; update preview-only names without changing custom names or other policy settings."},
 			{Method: http.MethodPost, Path: base + "/keys/reset-windows", Description: "Reset rolling usage windows for bound keys. Limit numbers are unchanged."},
 			{Method: http.MethodPatch, Path: base + "/keys", Description: "Update a bound key policy by id."},
 			{Method: http.MethodDelete, Path: base + "/keys", Description: "Unbind a key policy by id."},

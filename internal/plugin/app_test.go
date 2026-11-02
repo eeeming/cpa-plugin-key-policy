@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -545,6 +546,55 @@ func TestSyncPlusKeysImportsMissing(t *testing.T) {
 	}
 	if len(payload.Keys) != 2 {
 		t.Fatalf("keys = %+v", payload.Keys)
+	}
+}
+
+func TestSyncPlusKeysReportsRenameAndAliasDegradation(t *testing.T) {
+	app := configureApp(t)
+	const plain = "sk-sync-renamed-secret-abcdefgh"
+	bound := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys", mustJSON(map[string]any{
+		"id": "preview", "name": policy.PreviewKey(plain), "key": plain, "daily_limit_usd": 2,
+	}))
+	if bound.StatusCode != http.StatusCreated {
+		t.Fatalf("bind = %d %s", bound.StatusCode, bound.Body)
+	}
+	hash, err := policy.HashKey(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.Store().SetAPIKeyLister(func() ([]policy.PlusAPIKey, error) {
+		return []policy.PlusAPIKey{{Plain: plain}}, nil
+	})
+	app.Store().SetAPIKeyAliasLister(func() (map[string]string, error) {
+		return map[string]string{strings.TrimPrefix(hash, policy.HashPrefix): "renamed-team"}, nil
+	})
+	resp := callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys/sync", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sync = %d %s", resp.StatusCode, resp.Body)
+	}
+	var got policy.SyncResult
+	if err := json.Unmarshal(resp.Body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Added != 0 || got.Skipped != 1 || got.Total != 1 || got.Renamed != 1 || len(got.RenamedIDs) != 1 || got.RenamedIDs[0] != "preview" {
+		t.Fatalf("rename response = %+v", got)
+	}
+	app.Store().SetAPIKeyAliasLister(func() (map[string]string, error) {
+		return nil, errors.New("https://admin:management-secret@example.test?key=" + plain)
+	})
+	resp = callManagement(t, app, http.MethodPost, "/v0/management/plugins/cpa-key-quota/keys/sync", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("degraded sync = %d %s", resp.StatusCode, resp.Body)
+	}
+	got = policy.SyncResult{}
+	if err := json.Unmarshal(resp.Body, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Skipped != 1 || got.Renamed != 0 || len(got.Warnings) != 1 {
+		t.Fatalf("degraded response = %+v", got)
+	}
+	if strings.Contains(string(resp.Body), plain) || strings.Contains(string(resp.Body), "management-secret") || strings.Contains(string(resp.Body), "example.test") {
+		t.Fatal("degraded response exposed secret-bearing error")
 	}
 }
 

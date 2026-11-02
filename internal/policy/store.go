@@ -28,6 +28,7 @@ type Store struct {
 
 	listPrices      PriceLister
 	listAPIKeys     APIKeyLister
+	listKeyAliases  APIKeyAliasLister
 	priceMu         sync.Mutex
 	priceCache      []ModelPrice
 	pricesReady     bool
@@ -105,6 +106,12 @@ func (s *Store) SetAPIKeyLister(fn APIKeyLister) {
 	s.mu.Unlock()
 }
 
+func (s *Store) SetAPIKeyAliasLister(fn APIKeyAliasLister) {
+	s.mu.Lock()
+	s.listKeyAliases = fn
+	s.mu.Unlock()
+}
+
 func (s *Store) Configure(cfg Config) error {
 	s.updateMu.Lock()
 	defer s.updateMu.Unlock()
@@ -166,11 +173,13 @@ func (s *Store) Configure(cfg Config) error {
 	if cfg.PlusBaseURL != "" {
 		s.listPrices = HTTPPriceLister(nil, cfg.PlusBaseURL, cfg.PlusManagementKey)
 		s.listAPIKeys = HTTPAPIKeyLister(nil, cfg.PlusBaseURL, cfg.PlusManagementKey)
+		s.listKeyAliases = HTTPAPIKeyAliasLister(nil, cfg.PlusBaseURL, cfg.PlusManagementKey)
 	} else {
 		// An empty plus_base_url means "RPM only": drop the price source so a
 		// reconfigure cannot keep billing from a previously configured Plus.
 		s.listPrices = nil
 		s.listAPIKeys = nil
+		s.listKeyAliases = nil
 	}
 	// Bump the generation in the same critical section as the source swap so a
 	// concurrent fetch snapshots a consistent (lister, generation) pair.
@@ -656,6 +665,7 @@ func (s *Store) touchLastAccess(id string) {
 func (s *Store) SyncFromPlus() (SyncResult, error) {
 	s.mu.RLock()
 	lister := s.listAPIKeys
+	aliasLister := s.listKeyAliases
 	s.mu.RUnlock()
 	if lister == nil {
 		return SyncResult{}, fmt.Errorf("plus_base_url is empty")
@@ -665,6 +675,16 @@ func (s *Store) SyncFromPlus() (SyncResult, error) {
 		return SyncResult{}, err
 	}
 	out := SyncResult{Total: len(remote)}
+	var aliases map[string]string
+	if aliasLister != nil {
+		aliases, err = aliasLister()
+		if err != nil {
+			// Never expose errors supplied by upstream clients: they may include
+			// credential-bearing URLs or response bodies.
+			out.Warnings = []string{"Plus api-key-aliases unavailable; synced keys without aliases."}
+			aliases = nil
+		}
+	}
 	for _, item := range remote {
 		plain := strings.TrimSpace(item.Plain)
 		if plain == "" {
@@ -674,12 +694,23 @@ func (s *Store) SyncFromPlus() (SyncResult, error) {
 		if err != nil {
 			return out, err
 		}
-		if existing := s.findByHash(hash); existing != nil {
+		alias := strings.TrimSpace(aliases[strings.TrimPrefix(hash, HashPrefix)])
+		if strings.Contains(alias, plain) {
+			alias = ""
+		}
+		if s.findByHash(hash) != nil {
 			out.Skipped++
+			if id := s.renamePreviewKey(hash, alias); id != "" {
+				out.Renamed++
+				out.RenamedIDs = append(out.RenamedIDs, id)
+			}
 			continue
 		}
 		id := s.availableKeyID(hash)
 		name := strings.TrimSpace(item.Name)
+		if alias != "" {
+			name = alias
+		}
 		if name == "" || name == plain || strings.Contains(name, plain) {
 			name = PreviewKey(plain)
 		}
@@ -696,12 +727,31 @@ func (s *Store) SyncFromPlus() (SyncResult, error) {
 		out.Added++
 		out.AddedIDs = append(out.AddedIDs, id)
 	}
-	if out.Added > 0 {
+	if out.Added > 0 || out.Renamed > 0 {
 		if err := s.persistCurrentState(); err != nil {
 			return out, err
 		}
 	}
 	return out, nil
+}
+
+// renamePreviewKey checks the current name under both write locks so an
+// overlapping policy edit cannot lose any fields or have its custom name replaced.
+func (s *Store) renamePreviewKey(hash, alias string) string {
+	if alias == "" {
+		return ""
+	}
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := s.keysByHash[hash]
+	if key == nil || key.Name != key.KeyPreview || key.Name == alias {
+		return ""
+	}
+	key.Name = alias
+	key.UpdatedAt = time.Now().UTC()
+	return key.ID
 }
 
 // normalizeKey validates and canonicalizes one key policy the same way a

@@ -32,8 +32,11 @@ export async function deleteKey(id: string): Promise<void> {
 export interface SyncPlusResult {
   added: number;
   skipped: number;
+  renamed: number;
   total: number;
   added_ids?: string[];
+  renamed_ids?: string[];
+  warnings?: string[];
 }
 
 export async function syncPlusKeys(): Promise<SyncPlusResult> {

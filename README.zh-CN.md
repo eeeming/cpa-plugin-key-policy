@@ -58,7 +58,7 @@ ARM 宿主用 `plugins/linux/arm64/cpa-key-quota.so`。
 
 ### 3. 指向 CPA-Manager-Plus
 
-把 [配置](#配置) 里的片段写入 CPA 的 `config.yaml`。`plus_base_url` 必须是 **CPA 容器里能访问到的 Plus 地址**（Docker DNS，不要填公网域名），例如 `http://cpa-manager-plus:18317`。`plus_management_key` 是 **Plus 的 admin key**（`CPA_MANAGER_ADMIN_KEY`），用来读价表，以及 **同步** 时读 Plus `api-keys`。它不是 CPA 的 `remote-management.secret-key`。
+把 [配置](#配置) 里的片段写入 CPA 的 `config.yaml`。`plus_base_url` 必须是 **CPA 容器里能访问到的 Plus 地址**（Docker DNS，不要填公网域名），例如 `http://cpa-manager-plus:18317`。`plus_management_key` 是 **Plus 的 admin key**（`CPA_MANAGER_ADMIN_KEY`），用来读价表，以及 **同步** 时读 Plus `api-keys` 和可选的 `api-key-aliases`。它不是 CPA 的 `remote-management.secret-key`。
 
 这两项配好、且 Plus 里已有模型价格之后，USD 限额才会生效。见 [价目表](#价目表)。
 
@@ -124,7 +124,7 @@ plugins:
 | `enabled` | 不卸载插件的情况下暂停限额 |
 | `state_file` | 绑定策略和用量的 JSON（不存在会创建，权限 600） |
 | `plus_base_url` | CPA-Manager-Plus 地址（建议 Docker 内网）。见 [价目表](#价目表) |
-| `plus_management_key` | Plus admin 的 Bearer，用于价表以及 **同步**（`GET /v0/management/api-keys`） |
+| `plus_management_key` | Plus admin 的 Bearer，用于价表以及 **同步**（`GET /v0/management/api-keys` 和可选的 `GET /v0/management/api-key-aliases`） |
 | `keys` | 可选种子。状态文件一旦存在，以文件为准 |
 
 用量在内存里累计，大约每 15 秒原子写入状态文件（临时文件 + rename）。
@@ -143,7 +143,11 @@ Content-Type: application/json
 
 限额填 `0` 表示不限。同一路径 PATCH 可改限额、改名、启用/停用，或再贴明文换绑（立刻哈希）。
 
-**从 Plus 同步**（**同步**）：`POST /v0/management/plugins/cpa-key-quota/keys/sync` 拉取 Plus `GET /v0/management/api-keys`，把尚未绑定的 Key 加进来。已有名称/限额/启用状态/账号绑定不覆盖。新 Key 默认启用且不限额。有名称的条目显示名称；只有明文字符串的条目显示脱敏预览。无需维护别名：身份继续由现有 key hash/caller_scope 算法识别，修改使用稳定策略 `id`，不以显示名称为键。
+**从 Plus 同步**（**同步**）：`POST /v0/management/plugins/cpa-key-quota/keys/sync` 使用同一 admin Bearer 拉取 Plus `GET /v0/management/api-keys` 和可选的 `GET /v0/management/api-key-aliases`，按明文 Key 的 SHA-256 小写十六进制值匹配别名，不带 `sha256:` 前缀。新 Key 优先使用 Plus 别名；没有别名时，有名称的条目沿用名称，字符串条目使用脱敏 preview。新 Key 默认启用且不限额。
+
+已有 Key 仅在名称仍等于其脱敏 `key_preview` 且 Plus 有别名时改名；自定义名称、限额、启用状态和 Codex 绑定保持不变。删除 Plus 别名不会重置已有名称。身份仍由 key hash/caller_scope 识别，修改使用稳定策略 `id`，不以显示名称为键。
+
+响应包含 `added/skipped/renamed/total` 和可选的 `added_ids/renamed_ids`。`skipped` 仍计入全部已有 Key，包含本次 `renamed` 的子集。旧版 Plus 不支持别名端点、网络失败或别名响应无效时，同步仍成功，以无别名方式导入；通过脱敏 `warnings` 和 UI 提示说明降级，不暴露上游 URL、响应正文或明文 Key。
 
 停用（`enabled: false`）对**新请求**同时暂停限额和 Codex 绑定，Plus 侧 Key 仍可用。解绑只删插件策略；已放行的在途请求保留其签名分配。从 Plus `api-keys` 删掉才会 401。
 
