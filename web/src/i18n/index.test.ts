@@ -29,12 +29,6 @@ describe("translate", () => {
     expect(translate("keys.refresh")).toBe("Обновить");
   });
 
-  it("interpolates {{name}} placeholders", () => {
-    _resetLocale("en");
-    expect(translate("keys.unbindConfirm", { id: "team-a" })).toBe(
-      "Unbind team-a? Plus api-keys are not deleted.",
-    );
-  });
 
   it("handles zh-CN <-> zh-TW divergence (simplified vs traditional)", () => {
     _resetLocale("zh-CN");

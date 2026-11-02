@@ -46,38 +46,21 @@ export default function SchedulerDiagnostics() {
           {loading ? t("schedulerDiagnostics.loading") : t("schedulerDiagnostics.refresh")}
         </button>
       </div>
-      <p className="scheduler-risk" role="note">{t("schedulerDiagnostics.warning")}</p>
       <div aria-live="polite" aria-busy={loading}>
         <dl>
-          <div>
-            <dt>{t("schedulerDiagnostics.homeMode")}</dt>
-            <dd>{t("schedulerDiagnostics.unknown")}</dd>
-          </div>
-          <div>
-            <dt>{t("schedulerDiagnostics.highestPriority")}</dt>
-            <dd>{t("schedulerDiagnostics.unknown")}</dd>
-          </div>
-          <div>
-            <dt>{t("schedulerDiagnostics.acrossPriorities")}</dt>
-            <dd>{t("schedulerDiagnostics.unknown")}</dd>
-          </div>
           <div>
             <dt>{t("schedulerDiagnostics.pickCount")}</dt>
             <dd>{count === null ? t("schedulerDiagnostics.unknownCount") : count}</dd>
           </div>
           <div>
             <dt>{t("schedulerDiagnostics.lastPick")}</dt>
-            <dd>{lastUtc ? <time dateTime={lastUtc}>{lastUtc}</time> : t("schedulerDiagnostics.unknownTime")}</dd>
+            <dd>{lastUtc ? <time dateTime={lastUtc}>{lastDate!.toLocaleString()}</time> : t("schedulerDiagnostics.unknownTime")}</dd>
           </div>
         </dl>
         {!loading && count === null && (
           <p className="scheduler-diagnostics-note">{t("schedulerDiagnostics.unavailable")}</p>
         )}
-        {!loading && count === 0 && (
-          <p className="scheduler-diagnostics-note">{t("schedulerDiagnostics.noCalls")}</p>
-        )}
-        <p className="muted scheduler-diagnostics-note">{t("schedulerDiagnostics.observationHint")}</p>
-        {error && <p className="scheduler-diagnostics-note scheduler-diagnostics-error">{error}</p>}
+        {error && <p className="scheduler-diagnostics-note scheduler-diagnostics-error" role="alert">{error}</p>}
       </div>
     </section>
   );

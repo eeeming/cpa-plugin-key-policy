@@ -266,14 +266,25 @@ th.num, td.num { text-align: right; }
 .codex-add { align-self: flex-start; }
 .codex-fallback { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
 
+.batch-codex-modal h2 { margin: 0 0 12px; font-size: 20px; }
+.batch-codex-controls { min-width: 0; padding: 0; border: 0; margin: 16px 0; }
+.batch-codex-controls > .codex-fallback { margin-bottom: 16px; }
+.batch-codex-preview { margin: 20px 0; }
+.batch-codex-table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-md); }
+.batch-codex-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.batch-codex-preview th, .batch-codex-preview td { padding: 10px; text-align: left; vertical-align: top; overflow-wrap: anywhere; min-width: 80px; }
+.batch-codex-preview thead { background: var(--muted-bg); }
+.batch-codex-preview tbody tr:nth-child(even) { border-bottom: 1px solid var(--border); }
+.batch-codex-preview tbody tr:last-child { border-bottom: 0; }
+.batch-codex-actions { margin-top: 16px; flex-wrap: wrap; }
+
 .scheduler-diagnostics {
   margin-bottom: 16px; padding: 16px;
-  border: 1px solid var(--danger-border); border-radius: var(--r-md);
+  border: 1px solid var(--border); border-radius: var(--r-md);
   background: var(--panel);
 }
 .scheduler-diagnostics-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .scheduler-diagnostics h2 { margin: 0; font-size: 15px; }
-.scheduler-risk { margin: 12px 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--danger-soft); color: var(--danger); line-height: 1.6; font-size: 13px; }
 .scheduler-diagnostics dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 12px; margin: 12px 0; }
 .scheduler-diagnostics dl > div { min-width: 0; }
 .scheduler-diagnostics dt { color: var(--muted); font-size: 12px; margin-bottom: 4px; }

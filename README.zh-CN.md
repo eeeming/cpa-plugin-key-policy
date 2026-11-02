@@ -149,7 +149,7 @@ Content-Type: application/json
 
 响应包含 `added/skipped/renamed/total` 和可选的 `added_ids/renamed_ids`。`skipped` 仍计入全部已有 Key，包含本次 `renamed` 的子集。旧版 Plus 不支持别名端点、网络失败或别名响应无效时，同步仍成功，以无别名方式导入；通过脱敏 `warnings` 和 UI 提示说明降级，不暴露上游 URL、响应正文或明文 Key。
 
-停用（`enabled: false`）对**新请求**同时暂停限额和 Codex 绑定，Plus 侧 Key 仍可用。解绑只删插件策略；已放行的在途请求保留其签名分配。从 Plus `api-keys` 删掉才会 401。
+停用（`enabled: false`）对**新请求**同时暂停限额和 Codex 绑定，Plus 侧 Key 仍可用。**移除插件策略**（原“解绑”）删除该 Key 在插件中的限额/Codex 策略，不删除 Plus API key；**清除 Codex 绑定**则只清分配，保留插件策略和限额。已放行的在途请求保留其签名分配。从 Plus `api-keys` 删掉才会 401。
 
 **查看与重置**：`GET /v0/management/plugins/cpa-key-quota/keys/usage?id=<id>` 返回单个 Key 的 24h/7d 金额、请求数、窗口开始/重置时间，以及卡片里展示的按模型明细。`POST /v0/management/plugins/cpa-key-quota/keys/reset-windows` 传 `{"ids":["k-a","k-b"]}`，把这几个 Key 的滚动 24h/7d 用量和 RPM 分钟桶清零；限额数值、名称、启用状态都不变，Plus 侧用量也不动。未知 id 会出现在 `failed` 里。
 
@@ -185,9 +185,42 @@ Content-Type: application/json
 
 **凭证目录**：`GET /v0/management/plugins/cpa-key-quota/codex-auths` 返回 `available/source/accounts/diagnostics`。来源为 `host.auth.list`，并补充上限 1024 条的最近候选缓存。账号只返回 `id/label/name/email/status/disabled/unavailable/priority/source`，不返回路径、token 或完整凭证。宿主列表失败时明确 `available:false`；最近观察不是完整目录。成功目录中已缺失的历史项标不可用；UI 保留已选失效项，不自动清空造成解限。无目录也可手填 AuthID，换行/逗号/分号分隔，保留 ID 内部空格。
 
-**诊断**：启动日志、目录 API 与页面均提示“Home 模式下插件 scheduler 会被绕过，绑定不生效；需确保本插件为最高 priority scheduler”。当前 ABI 无法探测 Home、是否最高生效 scheduler、跨 priority 能力是否被接受，三者明确标 `unknown`，不是正常。`scheduler_pick_count` 和 UTC `last_scheduler_pick_at` 只记录观测到的调用；尚无调用时页面提示，可手动刷新，不后台轮询，不记录明文 Key。现有额度/RPM/免费模型逻辑和 `usage.handle` 计费不变。插件卸载/熔断、宿主路径绕过仍可能回落原生，这不是宿主级故障默认拒绝 ACL。
+**诊断**：目录 API 仅返回已观测的 `scheduler_pick_count` 和可选的 UTC `last_scheduler_pick_at`；管理 UI 用浏览器本地时区显示时间，支持手动刷新。不再展示无法探测的宿主状态，也不重复打印启动警告；调用次数不等于绑定有效性证明。现有额度/RPM/免费模型逻辑和 `usage.handle` 计费不变；插件卸载/熔断、宿主绕过仍可能回落原生调度。
 
 旧 version-1 state 缺新字段即不限制，保持 version 1 加法兼容。降级前备份 state：旧版保存时可能丢弃新字段。
+
+### 原子批量配置 Codex 绑定
+
+选择 Key 后点击**绑定 Codex**。弹窗先从服务端取得每个稳定 Key ID 的账号/分组/回落改前改后预览，点击**确认应用**才提交；修改表单会使旧预览失效。不提供按账号的反向视图。
+
+`POST /v0/management/plugins/cpa-key-quota/keys/codex-binding/batch` 使用 CPA 管理鉴权：
+
+```json
+{"ids":["k-a","k-b"],"accounts_mode":"add","codex_auth_ids":["codex-b.json"],"dry_run":true}
+```
+
+预览响应（不改内存或磁盘）：
+
+```json
+{"dry_run":true,"updated":0,"changes":[{"id":"k-a","before":{"codex_auth_ids":["codex-a.json"],"codex_group":"","codex_fallback":false},"after":{"codex_auth_ids":["codex-a.json","codex-b.json"],"codex_group":"","codex_fallback":false}},{"id":"k-b","before":{"codex_auth_ids":[],"codex_group":"","codex_fallback":false},"after":{"codex_auth_ids":["codex-b.json"],"codex_group":"","codex_fallback":false}}]}
+```
+
+提交时沿用同一操作，改为 `dry_run:false`，并把每行预览的旧值组成 `expected:[{"id":...,"before":...}]`。成功响应保留相同 `changes` 结构，`updated` 为所选数量。直接调用 API 可省略 `expected`；UI 始终携带它。
+
+| 请求字段 | 语义 |
+|---|---|
+| `ids` | 非空、精确的策略 ID；重复、空 ID 或未知策略导致整批失败 |
+| `accounts_mode` | 默认 `keep`；或 `set` 覆盖、`add` 并集追加、`remove` 差集移除 |
+| `codex_auth_ids` | set/add/remove 必填；set `[]` 只清账号；add/remove 须有非空白 ID；规范化与单个 PATCH 一致 |
+| `codex_group` | 省略保留各自分组；`""` 清分组；否则 trim/小写 |
+| `codex_fallback` | 省略保留各自开关；显式 `true`/`false` 设置 |
+| `clear:true` | 清账号、分组和回落；不可与其他绑定操作字段同时提供 |
+| `dry_run:true` | 整批校验及预览，不写状态 |
+| `expected` | 可选，须覆盖全部所选 ID 的旧绑定；预览过期返回 409 |
+
+请求无效/未知字段返回 400，未知策略 404，旧绑定不匹配 409，保存失败 500；任一失败均不改变绑定和原状态文件。成功时先一次原子保存暂存状态，再整体发布绑定，不改名称、hash、启用状态、额度/RPM 限额或用量。新请求立即使用新分配，在途请求与凭证重试继续沿用签名快照。
+
+纯非 Codex 路由在验签前返回 `Handled:false`，已绑定的 Key 也交还宿主原生选号；包含 Codex 的混合路由保持已有严格 Codex 绑定语义。OAuth 模型别名和 payload 规则仍由宿主原生处理。
 
 
 ## 滚动窗口
