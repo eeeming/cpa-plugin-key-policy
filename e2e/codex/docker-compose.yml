@@ -1,0 +1,103 @@
+name: cpa-key-quota-codex-e2e
+
+# CPA (eceasy/cli-proxy-api:latest) + CPA-Manager-Plus v1.13.1 + a mock
+# ChatGPT Codex backend. Two real Codex OAuth auth files (A, B) point at the
+# real executor path; the mock answers as chatgpt.com via a network alias and
+# a throwaway CA that only this CPA container trusts (SSL_CERT_FILE).
+
+services:
+  builder:
+    build:
+      context: ../..
+      dockerfile: e2e/codex/Dockerfile.plugin
+    image: local/cpa-key-quota-plugin:codex-e2e
+    volumes:
+      - plugin_lib:/out
+
+  fixtures:
+    build:
+      context: .
+      dockerfile: Dockerfile.fixtures
+    image: local/cpa-key-quota-codex-fixtures:e2e
+    # Seed writable config/auths and the throwaway CA into named volumes.
+    command: ["sh", "-c", "cp /fixtures/config.yaml /conf/config.yaml && cp /fixtures/auths/*.json /auths/ && cp /fixtures/certs/* /certs/ && chmod -R a+rwX /conf /auths /certs"]
+    volumes:
+      - cpa_conf:/conf
+      - cpa_auths:/auths
+      - certs:/certs
+
+  mock:
+    image: local/cpa-key-quota-codex-fixtures:e2e
+    command: ["python", "/app/mock_codex.py"]
+    volumes:
+      - certs:/certs:ro
+    networks:
+      default:
+        aliases:
+          - chatgpt.com
+          - auth.openai.com
+    expose:
+      - "443"
+      - "8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  plus:
+    image: seakee/cpa-manager-plus:v1.13.1
+    environment:
+      HTTP_ADDR: "0.0.0.0:18317"
+      USAGE_DB_PATH: "/data/usage.sqlite"
+      CPA_MANAGER_ADMIN_KEY: "e2e-admin-key"
+      CPA_UPSTREAM_URL: "http://cpa:8317"
+      CPA_MANAGEMENT_KEY: "e2e-mgmt-key"
+      USAGE_COLLECTOR_MODE: "auto"
+    volumes:
+      - plus_data:/data
+    expose:
+      - "18317"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:18317/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  cpa:
+    image: eceasy/cli-proxy-api:latest
+    depends_on:
+      mock:
+        condition: service_healthy
+      plus:
+        condition: service_healthy
+    environment:
+      SSL_CERT_FILE: /certs/ca.pem
+    command: ["./CLIProxyAPI", "-config", "/CLIProxyAPI/conf/config.yaml", "-local-model"]
+    volumes:
+      - cpa_conf:/CLIProxyAPI/conf
+      - cpa_auths:/CLIProxyAPI/auths
+      - certs:/certs:ro
+      - plugin_lib:/CLIProxyAPI/plugins
+      - cpa_data:/CLIProxyAPI/data
+    ports:
+      - "127.0.0.1:18517:8317"
+
+  e2e:
+    image: local/cpa-key-quota-codex-fixtures:e2e
+    environment:
+      CPA_URL: http://cpa:8317
+      PLUS_URL: http://plus:18317
+      MOCK_URL: http://mock:8080
+      MGMT_KEY: e2e-mgmt-key
+      PLUS_ADMIN_KEY: e2e-admin-key
+    command: ["python", "/app/e2e_codex.py"]
+
+volumes:
+  plugin_lib:
+  cpa_data:
+  cpa_conf:
+  cpa_auths:
+  certs:
+  plus_data:

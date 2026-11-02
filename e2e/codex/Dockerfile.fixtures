@@ -1,0 +1,5 @@
+# Test fixtures as an image: works with a remote Docker daemon, where bind
+# mounts of this checkout are not visible.
+FROM python:3.12-alpine
+COPY mock_codex.py e2e_codex.py /app/
+COPY .run/ /fixtures/

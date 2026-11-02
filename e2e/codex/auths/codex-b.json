@@ -1,0 +1,11 @@
+{
+  "type": "codex",
+  "email": "codex-b@e2e.test",
+  "account_id": "acct-b",
+  "access_token": "tok-codex-b",
+  "refresh_token": "rt-codex-b",
+  "id_token": "",
+  "plan_type": "plus",
+  "last_refresh": "2026-11-01T00:00:00Z",
+  "expired": "2099-01-01T00:00:00Z"
+}
