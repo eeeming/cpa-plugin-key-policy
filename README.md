@@ -139,6 +139,12 @@ Content-Type: application/json
 ```
 
 `0` on a limit means unlimited. PATCH the same path to edit limits, rename, enable/disable, or rotate the key (new plaintext, hashed immediately).
+You can also set key-level Codex account isolation with:
+
+- `allowed_auth_ids`: list of scheduler AuthIDs this key may use
+- `auth_group`: optional scheduler group filter
+
+When present, `request.intercept_before` stamps these values into request metadata and `scheduler.pick` hard-fails if no matching available candidate exists.
 
 **Sync from Plus** (**Sync**): `POST /v0/management/plugins/cpa-key-quota/keys/sync` fetches Plus `GET /v0/management/api-keys` and binds keys that are not already hashed in the plugin. Existing names/limits/enabled flags are not overwritten. New keys start enabled with unlimited USD/RPM. Plus currently returns a plaintext string list **without display names**, so synced names default to the preview; rename in **Edit**.
 

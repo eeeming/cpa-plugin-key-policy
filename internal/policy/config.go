@@ -28,6 +28,8 @@ type KeyConfig struct {
 	KeyHash        string    `yaml:"key_hash" json:"key_hash"`
 	KeyPreview     string    `yaml:"key_preview" json:"key_preview"`
 	CallerScope    string    `yaml:"caller_scope,omitempty" json:"caller_scope,omitempty"`
+	AllowedAuthIDs []string  `yaml:"allowed_auth_ids,omitempty" json:"allowed_auth_ids,omitempty"`
+	AuthGroup      string    `yaml:"auth_group,omitempty" json:"auth_group,omitempty"`
 	RPM            int       `yaml:"rpm" json:"rpm"`
 	DailyLimitUSD  float64   `yaml:"daily_limit_usd,omitempty" json:"daily_limit_usd,omitempty"`
 	WeeklyLimitUSD float64   `yaml:"weekly_limit_usd,omitempty" json:"weekly_limit_usd,omitempty"`
@@ -136,6 +138,8 @@ func normalizeConfig(cfg *Config) error {
 		key.KeyHash = strings.TrimSpace(key.KeyHash)
 		key.KeyPreview = strings.TrimSpace(key.KeyPreview)
 		key.CallerScope = strings.TrimSpace(key.CallerScope)
+		key.AuthGroup = strings.TrimSpace(key.AuthGroup)
+		key.AllowedAuthIDs = normalizeAllowedAuthIDs(key.AllowedAuthIDs)
 		if key.ID == "" {
 			return errors.New("key id is required")
 		}
@@ -166,6 +170,30 @@ func normalizeConfig(cfg *Config) error {
 	cfg.PlusBaseURL = strings.TrimRight(strings.TrimSpace(cfg.PlusBaseURL), "/")
 	cfg.PlusManagementKey = strings.TrimSpace(cfg.PlusManagementKey)
 	return nil
+}
+
+func normalizeAllowedAuthIDs(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, raw := range in {
+		id := strings.TrimSpace(raw)
+		if id == "" {
+			continue
+		}
+		key := strings.ToLower(id)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func ResolveStatePath(path string) (string, error) {

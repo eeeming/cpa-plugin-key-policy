@@ -16,6 +16,8 @@ export interface KeyPublic {
   name: string;
   enabled: boolean;
   key_preview: string;
+  allowed_auth_ids?: string[];
+  auth_group?: string;
   rpm: number;
   daily_limit_usd: number;
   weekly_limit_usd: number;
@@ -29,6 +31,8 @@ export interface KeyWriteRequest {
   name?: string;
   enabled?: boolean;
   key?: string;
+  allowed_auth_ids?: string[];
+  auth_group?: string;
   rpm?: number;
   daily_limit_usd?: number;
   weekly_limit_usd?: number;

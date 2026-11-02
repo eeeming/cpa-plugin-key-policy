@@ -21,6 +21,20 @@ function usdLabel(v: number, unlimited: string): string {
   return "$" + v;
 }
 
+function parseAuthIDs(raw: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const id = part.trim();
+    if (!id) continue;
+    const key = id.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(id);
+  }
+  return out;
+}
+
 // Close a modal on Escape (the overlay click is mouse-only).
 function useEscape(onClose: () => void) {
   useEffect(() => {
@@ -510,6 +524,8 @@ function BindModal({
   const [daily, setDaily] = useState(existing ? String(existing.daily_limit_usd || "") : "");
   const [weekly, setWeekly] = useState(existing ? String(existing.weekly_limit_usd || "") : "");
   const [rpm, setRpm] = useState(existing ? String(existing.rpm || "") : "");
+  const [allowedAuthIDs, setAllowedAuthIDs] = useState((existing?.allowed_auth_ids ?? []).join(", "));
+  const [authGroup, setAuthGroup] = useState(existing?.auth_group ?? "");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   useEscape(onClose);
@@ -532,6 +548,8 @@ function BindModal({
     const req: KeyWriteRequest = { ...limitPatch(id, parsed.values ?? {}), name: name.trim() || id };
     const plain = key.trim();
     if (plain) req.key = plain;
+    req.allowed_auth_ids = parseAuthIDs(allowedAuthIDs);
+    req.auth_group = authGroup.trim();
     setBusy(true);
     try {
       await onSubmit(req);
@@ -587,6 +605,28 @@ function BindModal({
           onWeekly={setWeekly}
           onRpm={setRpm}
         />
+        <div className="form-row">
+          <label htmlFor="bind-auth-ids">{t("bind.allowedAuthIDs")}</label>
+          <input
+            id="bind-auth-ids"
+            className="input"
+            value={allowedAuthIDs}
+            onChange={(e) => setAllowedAuthIDs(e.target.value)}
+            placeholder="auth-a, auth-b"
+          />
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{t("bind.allowedAuthIDsHint")}</div>
+        </div>
+        <div className="form-row">
+          <label htmlFor="bind-auth-group">{t("bind.authGroup")}</label>
+          <input
+            id="bind-auth-group"
+            className="input"
+            value={authGroup}
+            onChange={(e) => setAuthGroup(e.target.value)}
+            placeholder="team-a"
+          />
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{t("bind.authGroupHint")}</div>
+        </div>
         {err && <div className="error" role="alert">{err}</div>}
         <div className="fp-actions" style={{ marginTop: 12 }}>
           <button className="btn" type="button" onClick={onClose}>{t("bind.cancel")}</button>

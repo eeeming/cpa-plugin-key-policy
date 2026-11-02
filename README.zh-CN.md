@@ -139,6 +139,12 @@ Content-Type: application/json
 ```
 
 限额填 `0` 表示不限。同一路径 PATCH 可改限额、改名、启用/停用，或再贴明文换绑（立刻哈希）。
+也可配置按 Key 的 Codex 账号隔离：
+
+- `allowed_auth_ids`：该 Key 允许使用的 scheduler AuthID 列表
+- `auth_group`：可选 scheduler 分组过滤
+
+配置后，`request.intercept_before` 会把这些值写入请求 Metadata，`scheduler.pick` 找不到匹配且可用的候选时会硬失败。
 
 **从 Plus 同步**（**同步**）：`POST /v0/management/plugins/cpa-key-quota/keys/sync` 拉取 Plus `GET /v0/management/api-keys`，把尚未绑定的 Key 加进来。已有名称/限额/启用状态不覆盖。新 Key 默认启用且不限额。Plus 目前只返回明文字符串、**没有显示名**，同步后的名字是 preview，可在 **编辑** 里改。
 

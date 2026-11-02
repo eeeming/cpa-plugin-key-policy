@@ -73,6 +73,10 @@
     "daily": "日限額 USD（空=不限，滾動 24 小時）",
     "weekly": "周限額 USD（空=不限，滾動 7 天）",
     "rpm": "RPM（空=不限）",
+    "allowedAuthIDs": "允許的 Codex AuthID",
+    "allowedAuthIDsHint": "以逗號分隔。設定後此 Key 僅會調度到這些 AuthID。",
+    "authGroup": "Codex 帳號群組",
+    "authGroupHint": "可選群組過濾。設定後此 Key 僅能使用此群組內候選。",
     "submit": "绑定",
     "save": "保存",
     "cancel": "取消"
