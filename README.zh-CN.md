@@ -15,6 +15,7 @@
 - 能 `dlopen` c-shared `.so` 的 CLIProxyAPI v7 宿主。用 glibc 镜像，例如 `eceasy/cli-proxy-api`。Alpine / `CGO_ENABLED=0` 的宿主加载不了本插件。
 - Linux `amd64` 或 `arm64`，且与 CPA 宿主架构一致（`CGO_ENABLED=1`）。
 - **USD 限额依赖 CPA-Manager-Plus**。插件读取 Plus `GET /v0/management/model-prices`，按该表记账。没有 Plus 时 RPM 仍然有效。
+- Codex 账号绑定还要求宿主支持 `scheduler.pick`、`scheduler_across_priorities`；目录读取使用可选的 `host.auth.list` 回调。不能仅凭 ABI version 1 判断这些能力存在。
 
 **不要**声明 `frontend_auth_provider`。超限必须 `Terminate` 429，不能靠 `Authenticated: false`。
 
@@ -116,6 +117,8 @@ plugins:
       plus_management_key: "your-plus-admin-key"
 ```
 
+没有其他 scheduler 插件时，`priority: 10` 已足够；仅提供 provider 的插件不会竞争该能力。CPA **只调用一个** scheduler：插件 priority 最高者，同值按插件 ID 排序。以后加其他 scheduler 时须确保本插件最高。返回 `Handled:false` 会交还原生调度，不会继续试低 priority 插件。**Home 派发会绕过插件 scheduler**；使用绑定时应关闭 Home。提高 priority 或看到过 pick 调用，都不能证明 Home 状态或宿主能力已被确认。
+
 | 字段 | 作用 |
 |---|---|
 | `enabled` | 不卸载插件的情况下暂停限额 |
@@ -140,11 +143,46 @@ Content-Type: application/json
 
 限额填 `0` 表示不限。同一路径 PATCH 可改限额、改名、启用/停用，或再贴明文换绑（立刻哈希）。
 
-**从 Plus 同步**（**同步**）：`POST /v0/management/plugins/cpa-key-quota/keys/sync` 拉取 Plus `GET /v0/management/api-keys`，把尚未绑定的 Key 加进来。已有名称/限额/启用状态不覆盖。新 Key 默认启用且不限额。Plus 目前只返回明文字符串、**没有显示名**，同步后的名字是 preview，可在 **编辑** 里改。
+**从 Plus 同步**（**同步**）：`POST /v0/management/plugins/cpa-key-quota/keys/sync` 拉取 Plus `GET /v0/management/api-keys`，把尚未绑定的 Key 加进来。已有名称/限额/启用状态/账号绑定不覆盖。新 Key 默认启用且不限额。有名称的条目显示名称；只有明文字符串的条目显示脱敏预览。无需维护别名：身份继续由现有 key hash/caller_scope 算法识别，修改使用稳定策略 `id`，不以显示名称为键。
 
-停用（`enabled: false`）只暂停限额，Plus 侧 Key 仍可用。解绑只删插件策略。从 Plus `api-keys` 删掉才会 401。
+停用（`enabled: false`）对**新请求**同时暂停限额和 Codex 绑定，Plus 侧 Key 仍可用。解绑只删插件策略；已放行的在途请求保留其签名分配。从 Plus `api-keys` 删掉才会 401。
 
 **查看与重置**：`GET /v0/management/plugins/cpa-key-quota/keys/usage?id=<id>` 返回单个 Key 的 24h/7d 金额、请求数、窗口开始/重置时间，以及卡片里展示的按模型明细。`POST /v0/management/plugins/cpa-key-quota/keys/reset-windows` 传 `{"ids":["k-a","k-b"]}`，把这几个 Key 的滚动 24h/7d 用量和 RPM 分钟桶清零；限额数值、名称、启用状态都不变，Plus 侧用量也不动。未知 id 会出现在 `failed` 里。
+
+## 绑定上游 Codex 账号
+
+编辑 Key 时可以多选账号、按 ID/邮箱/标签/状态搜索、手填 AuthID、设置可选分组，以及显式允许回退；卡片会显示绑定摘要。名称只用于显示：无名称时使用脱敏 Key 预览，改名不丢分配。AuthID 应填宿主凭证记录的 `id`，不是 `auth_index`、邮箱、OAuth account ID，更不是下游明文 Key。
+
+现有 `/keys` GET/POST/PATCH 支持以下逐 Key 字段，state 中存于 `keys[]`：
+
+| 字段 | 行为 |
+|---|---|
+| `codex_auth_ids` | AuthID 白名单，去两端空白、去重、大小写精确匹配；空数组表示不加 ID 条件 |
+| `codex_group` | 可选 `plan_type`，缺失时兼容 `tier`；trim/小写，与 ID 条件取 AND |
+| `codex_fallback` | 默认 `false`：无匹配返回 503，错误码 `codex_binding_unavailable`；显式 `true` 仅在无绑定匹配时放宽到其他可用 Codex，不跨 provider |
+
+IDs 与 group 都空表示不限制，返回 `Handled:false` 保留 CPA 原生调度/会话亲和。绑定不能越过宿主候选集；冷却、停用、模型不支持、重试已排除的账号均不能强行选中。清空绑定时须明确 PATCH 空数组、空分组、`false`；未提供的字段不修改：
+
+```http
+PATCH /v0/management/plugins/cpa-key-quota/keys
+Authorization: Bearer <CPA remote-management secret-key>
+Content-Type: application/json
+
+{"id":"k-team","codex_auth_ids":["codex-auth-record-id"],"codex_group":"","codex_fallback":false}
+```
+
+**会话粘性**：只绑定一个账号时直接选它。多账号时，同一可见会话保持在仍被允许且出现在本次候选中的账号上，即使更高 priority 的允许账号恢复也不抢回。粘性账号消失时才在允许集合内换绑。新会话和无会话请求按最高允许 priority 层、稳定 AuthID 顺序轮询。插件声明 `scheduler_across_priorities=true`，避免低优先级白名单账号被无关的高优先级账号遮住。
+
+会话键优先取宿主 `Options.Metadata.canonical_session_id`（已综合 header/body），其次按宿主顺序提取会话头，再退到 `execution_session_id`、`lcp_affinity_session_id`、`derived_session_id`。支持 Claude/Codex session/agent/thread，以及通用 session/affinity/slot/conversation/client-request 头。scheduler ABI 没有正文，正文会话依赖宿主增强，不重新解码 interceptor Body，也不复刻完整 LCP/父子会话缓存。粘性仅保存 SHA-256 会话身份，按 key 指纹、签名分配、provider/model 隔离；上限 4096 条、1 小时滑动 TTL、惰性过期/FIFO 容量淘汰。新分配使用独立粘性，在途旧请求不能覆盖新分配的映射。轮询池另限 4096 个。
+
+**分配变更语义**：每次 admission 读取最新已发布的内存策略，不长期缓存策略，也不在额度检查后第二次查表。仅额度放行后写 `X-Cpa-Key-Quota-Binding`：版本化、HMAC-SHA256 签名的自包含快照，包含不可逆 key 身份、允许的 AuthID、group/fallback 和 restricted 标志，不含下游明文或显示名。PATCH/reconfigure 不换进程签名密钥；每次 pick（含凭证重试）只读快照，不读实时策略。新请求立即用新分配，在途请求沿旧分配跑完。客户端同名头会被清除/覆盖；缺头交还原生，验签失败返回 `codex_binding_invalid`/403；`request.intercept_after` 在执行前清掉内部头。进程/插件重新加载会换密钥，不保证跨重载继续在途请求。
+
+**凭证目录**：`GET /v0/management/plugins/cpa-key-quota/codex-auths` 返回 `available/source/accounts/diagnostics`。来源为 `host.auth.list`，并补充上限 1024 条的最近候选缓存。账号只返回 `id/label/name/email/status/disabled/unavailable/priority/source`，不返回路径、token 或完整凭证。宿主列表失败时明确 `available:false`；最近观察不是完整目录。成功目录中已缺失的历史项标不可用；UI 保留已选失效项，不自动清空造成解限。无目录也可手填 AuthID，换行/逗号/分号分隔，保留 ID 内部空格。
+
+**诊断**：启动日志、目录 API 与页面均提示“Home 模式下插件 scheduler 会被绕过，绑定不生效；需确保本插件为最高 priority scheduler”。当前 ABI 无法探测 Home、是否最高生效 scheduler、跨 priority 能力是否被接受，三者明确标 `unknown`，不是正常。`scheduler_pick_count` 和 UTC `last_scheduler_pick_at` 只记录观测到的调用；尚无调用时页面提示，可手动刷新，不后台轮询，不记录明文 Key。现有额度/RPM/免费模型逻辑和 `usage.handle` 计费不变。插件卸载/熔断、宿主路径绕过仍可能回落原生，这不是宿主级故障默认拒绝 ACL。
+
+旧 version-1 state 缺新字段即不限制，保持 version 1 加法兼容。降级前备份 state：旧版保存时可能丢弃新字段。
+
 
 ## 滚动窗口
 

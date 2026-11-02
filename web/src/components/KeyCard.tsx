@@ -5,6 +5,7 @@ import { errText } from "../api/error";
 import { useT } from "../i18n";
 import QuotaMeter from "./QuotaMeter";
 import { formatUsd } from "../quota";
+import { normalizeAuthIds } from "../codexBinding";
 
 export default function KeyCard({
   k,
@@ -18,6 +19,7 @@ export default function KeyCard({
   onToggleSelect?: () => void;
 }) {
   const t = useT();
+  const displayName = k.name || k.key_preview || k.id;
   const st = quotaStatus(k);
   const statusLabel =
     st === "disabled" ? t("keys.disabled")
@@ -25,6 +27,7 @@ export default function KeyCard({
         : st === "weekly" ? t("usage.statusWeekly")
           : t("usage.statusOk");
   const over = st === "daily" || st === "weekly";
+  const authIds = normalizeAuthIds(k.codex_auth_ids ?? []);
   const [open, setOpen] = useState(false);
   const [models, setModels] = useState<AliasUsageRow[] | null>(null);
   const [modelErr, setModelErr] = useState("");
@@ -58,13 +61,13 @@ export default function KeyCard({
           type="checkbox"
           checked={!!selected}
           onChange={() => onToggleSelect?.()}
-          aria-label={t("keys.selectOne", { name: k.name })}
+          aria-label={t("keys.selectOne", { name: displayName })}
         />
         <span className="kc-check-box" aria-hidden="true" />
       </label>
       <span className="kc-dot" />
       <div className="kc-title">
-        <span className="kc-name">{k.name}</span>
+        <span className="kc-name">{displayName}</span>
         <span className={"tag" + (k.enabled ? (over ? " off" : " on") : " off")}>{statusLabel}</span>
       </div>
       <div className="kc-preview">{k.key_preview}</div>
@@ -81,6 +84,12 @@ export default function KeyCard({
         limit={k.weekly_limit_usd}
         resetAt={k.usage.weekly_reset_at}
       />
+      <div className="kc-binding">
+        <span>{t("codex.cardTitle")}: {authIds.length ? t("codex.cardCount", { count: authIds.length }) : t("codex.cardNoAccounts")}</span>
+        {authIds.length > 0 && <span className="mono kc-binding-ids" title={authIds.join(", ")}>{authIds.join(", ")}</span>}
+        {k.codex_group && <span>{t("codex.group")}: {k.codex_group}</span>}
+        <span>{k.codex_fallback ? t("codex.fallbackOn") : t("codex.fallbackOff")}</span>
+      </div>
       {open && (
         <div className="kc-models">
           {modelErr && <div className="muted" style={{ color: "var(--danger)" }}>{modelErr}</div>}

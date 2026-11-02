@@ -19,6 +19,9 @@ export interface KeyPublic {
   rpm: number;
   daily_limit_usd: number;
   weekly_limit_usd: number;
+  codex_auth_ids?: string[];
+  codex_group?: string;
+  codex_fallback?: boolean;
   usage: UsageSummary;
   created_at?: string;
   updated_at?: string;
@@ -32,6 +35,9 @@ export interface KeyWriteRequest {
   rpm?: number;
   daily_limit_usd?: number;
   weekly_limit_usd?: number;
+  codex_auth_ids?: string[];
+  codex_group?: string;
+  codex_fallback?: boolean;
 }
 
 export interface BindKeyResponse {
@@ -72,4 +78,33 @@ export interface StatusResponse {
   enabled: boolean;
   state_file: string;
   key_count: number;
+}
+
+export interface CodexAuthAccount {
+  id: string;
+  label?: string;
+  name?: string;
+  email?: string;
+  status?: string;
+  disabled?: boolean;
+  unavailable?: boolean;
+  priority?: number;
+  source: "host" | "recent" | "host+recent";
+}
+
+export interface CodexSchedulerDiagnostics {
+  home_mode: "unknown";
+  highest_priority_scheduler: "unknown";
+  scheduler_across_priorities: "unknown";
+  scheduler_pick_count: number;
+  last_scheduler_pick_at?: string;
+  warning: string;
+}
+
+export interface CodexAuthListResponse {
+  available: boolean;
+  source: "host" | "recent" | "unavailable";
+  accounts: CodexAuthAccount[];
+  error?: string;
+  diagnostics?: CodexSchedulerDiagnostics;
 }

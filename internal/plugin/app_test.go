@@ -58,11 +58,14 @@ func TestRegistrationIdentityAndCapabilities(t *testing.T) {
 		t.Fatalf("name = %q", reg.Metadata.Name)
 	}
 	c := reg.Capabilities
-	if c.FrontendAuthProvider || c.FrontendAuthProviderExclusive || c.ModelRouter || c.Scheduler || c.ResponseInterceptor {
+	if c.FrontendAuthProvider || c.FrontendAuthProviderExclusive || c.ModelRouter || c.ResponseInterceptor {
 		t.Fatalf("must not declare dropped capabilities: %+v", c)
 	}
 	if !c.RequestInterceptor || !c.UsagePlugin || !c.ManagementAPI {
 		t.Fatalf("missing required capabilities: %+v", c)
+	}
+	if !c.Scheduler || !c.SchedulerAcrossPriorities {
+		t.Fatalf("missing scheduler capabilities: %+v", c)
 	}
 }
 

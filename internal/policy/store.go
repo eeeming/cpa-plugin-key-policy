@@ -52,6 +52,8 @@ type AdmitDecision struct {
 	StatusCode int
 	KeyID      string
 	Reason     string
+	// Policy is the admission-time copy, present only for an enabled, admitted policy.
+	Policy *KeyConfig
 }
 
 func NewStore() *Store {
@@ -136,7 +138,7 @@ func (s *Store) Configure(cfg Config) error {
 	next := make(map[string]*KeyConfig, len(keys))
 	now := time.Now().UTC()
 	for i := range keys {
-		item := keys[i]
+		item := cloneKey(keys[i])
 		if item.CreatedAt.IsZero() {
 			item.CreatedAt = now
 		}
@@ -272,7 +274,7 @@ func (s *Store) AdmitRequest(req GateRequest) AdmitDecision {
 			}
 		}
 	}
-	return AdmitDecision{Known: true, Allowed: true, KeyID: key.ID, Reason: "allowed"}
+	return AdmitDecision{Known: true, Allowed: true, KeyID: key.ID, Reason: "allowed", Policy: key}
 }
 
 // requestIsFree reports whether this request targets a model that bills
@@ -530,7 +532,7 @@ func (s *Store) findByHash(hash string) *KeyConfig {
 	if key == nil {
 		return nil
 	}
-	copy := *key
+	copy := cloneKey(*key)
 	return &copy
 }
 
@@ -545,7 +547,7 @@ func (s *Store) findByCallerScope(scope string) *KeyConfig {
 	if key == nil {
 		return nil
 	}
-	copy := *key
+	copy := cloneKey(*key)
 	return &copy
 }
 
@@ -578,7 +580,7 @@ func (s *Store) findByID(id string) *KeyConfig {
 	if key == nil {
 		return nil
 	}
-	copy := *key
+	copy := cloneKey(*key)
 	return &copy
 }
 
@@ -621,7 +623,7 @@ func (s *Store) Keys() []KeyConfig {
 func (s *Store) keysSnapshotLocked() []KeyConfig {
 	keys := make([]KeyConfig, 0, len(s.keys))
 	for _, key := range s.keys {
-		keys = append(keys, *key)
+		keys = append(keys, cloneKey(*key))
 	}
 	sort.Slice(keys, func(i, j int) bool {
 		ai, aj := keys[i].LastAccessAt, keys[j].LastAccessAt
@@ -716,6 +718,7 @@ func normalizeKey(input KeyConfig) (KeyConfig, error) {
 // unique-hash invariant and preserving immutable fields (created/last-access
 // timestamps, and the stored secret when the update carries no new hash).
 func (s *Store) applyKeyLocked(key KeyConfig) error {
+	key = cloneKey(key)
 	now := time.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -775,7 +778,7 @@ func (s *Store) UpdateKey(id string, mutate func(*KeyConfig) error) (KeyConfig, 
 	current := s.keys[id]
 	var work KeyConfig
 	if current != nil {
-		work = *current
+		work = cloneKey(*current)
 	}
 	s.mu.RUnlock()
 	if current == nil {

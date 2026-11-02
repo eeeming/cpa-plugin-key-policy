@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 
 	"cpa-key-policy/internal/plugin/web"
@@ -12,11 +14,17 @@ import (
 )
 
 type App struct {
-	store *policy.Store
+	store   *policy.Store
+	binding *bindingScheduler
+	catalog *codexCatalog
+	logger  *log.Logger
 }
 
 func NewApp() *App {
-	return &App{store: policy.NewStore()}
+	return &App{
+		store: policy.NewStore(), binding: newBindingScheduler(), catalog: newCodexCatalog(),
+		logger: log.New(os.Stderr, PluginID+": ", log.LstdFlags),
+	}
 }
 
 func (a *App) HandleMethod(method string, request []byte) ([]byte, error) {
@@ -35,7 +43,14 @@ func (a *App) handleMethod(method string, request []byte) ([]byte, error) {
 	case MethodRequestInterceptBefore:
 		return a.interceptBefore(request)
 	case MethodRequestInterceptAfter:
-		return OKEnvelope(RequestInterceptResponse{})
+		return OKEnvelope(RequestInterceptResponse{ClearHeaders: []string{bindingHeader}})
+	case MethodSchedulerPick:
+		var req SchedulerPickRequest
+		if err := json.Unmarshal(request, &req); err != nil {
+			return nil, err
+		}
+		a.catalog.observe(req.Candidates)
+		return a.binding.pick(req)
 	case MethodUsageHandle:
 		return a.handleUsage(request)
 	case MethodManagementRegister:
@@ -72,6 +87,7 @@ func (a *App) configure(raw []byte) error {
 		return err
 	}
 	a.store.StartUsageFlusher()
+	a.logger.Print("Codex binding diagnostics: home_mode=unknown; highest_priority_scheduler=unknown; scheduler_across_priorities=unknown. ", codexBindingDiagnosticWarning)
 	return nil
 }
 
@@ -96,9 +112,11 @@ func (a *App) registration() Registration {
 			},
 		},
 		Capabilities: Capabilities{
-			RequestInterceptor: true,
-			UsagePlugin:        true,
-			ManagementAPI:      true,
+			RequestInterceptor:        true,
+			UsagePlugin:               true,
+			ManagementAPI:             true,
+			Scheduler:                 true,
+			SchedulerAcrossPriorities: true,
 		},
 	}
 }
@@ -141,7 +159,7 @@ func (a *App) interceptBefore(raw []byte) ([]byte, error) {
 		Model: interceptModel(req),
 	})
 	if !decision.Terminate {
-		return OKEnvelope(RequestInterceptResponse{})
+		return a.bindingResponse(decision.Policy, req.Headers)
 	}
 	errType, errCode, message := quotaClientError(decision.Reason)
 	body, _ := json.Marshal(map[string]any{
@@ -161,6 +179,7 @@ func (a *App) interceptBefore(raw []byte) ([]byte, error) {
 		StatusCode:      decision.StatusCode,
 		ResponseHeaders: headers,
 		ResponseBody:    body,
+		ClearHeaders:    bindingHeaderNames(req.Headers),
 	})
 }
 
@@ -211,6 +230,7 @@ func (a *App) managementRegistration() ManagementRegistrationResponse {
 			{Method: http.MethodDelete, Path: base + "/keys", Description: "Unbind a key policy by id."},
 			{Method: http.MethodGet, Path: base + "/keys/usage", Description: "Usage for one bound key by id."},
 			{Method: http.MethodGet, Path: base + "/status", Description: "Show cpa-key-quota runtime status."},
+			{Method: http.MethodGet, Path: base + "/codex-auths", Description: "List available and recently observed Codex accounts."},
 		},
 		Resources: []ResourceRoute{
 			{Path: web.IndexPath, Menu: "Key Quota", Description: "Bind existing Plus api-keys and view per-key quota usage."},
@@ -249,19 +269,24 @@ func (a *App) handleManagement(raw []byte) ([]byte, error) {
 		return OKEnvelope(a.keyUsage(idFromRequest(req.Query, req.Body)))
 	case req.Method == http.MethodGet && path == base+"/status":
 		return OKEnvelope(jsonResponse(http.StatusOK, a.store.Status()))
+	case req.Method == http.MethodGet && path == base+"/codex-auths":
+		return OKEnvelope(jsonResponse(http.StatusOK, a.catalog.list()))
 	default:
 		return OKEnvelope(jsonError(http.StatusNotFound, "not_found", "unknown management route"))
 	}
 }
 
 type keyWriteRequest struct {
-	ID             string   `json:"id"`
-	Name           *string  `json:"name,omitempty"`
-	Enabled        *bool    `json:"enabled,omitempty"`
-	Key            string   `json:"key,omitempty"`
-	RPM            *int     `json:"rpm,omitempty"`
-	DailyLimitUSD  *float64 `json:"daily_limit_usd,omitempty"`
-	WeeklyLimitUSD *float64 `json:"weekly_limit_usd,omitempty"`
+	ID             string    `json:"id"`
+	Name           *string   `json:"name,omitempty"`
+	Enabled        *bool     `json:"enabled,omitempty"`
+	Key            string    `json:"key,omitempty"`
+	RPM            *int      `json:"rpm,omitempty"`
+	DailyLimitUSD  *float64  `json:"daily_limit_usd,omitempty"`
+	WeeklyLimitUSD *float64  `json:"weekly_limit_usd,omitempty"`
+	CodexAuthIDs   *[]string `json:"codex_auth_ids,omitempty"`
+	CodexGroup     *string   `json:"codex_group,omitempty"`
+	CodexFallback  *bool     `json:"codex_fallback,omitempty"`
 }
 
 type publicKey struct {
@@ -272,6 +297,9 @@ type publicKey struct {
 	RPM            int                 `json:"rpm"`
 	DailyLimitUSD  float64             `json:"daily_limit_usd"`
 	WeeklyLimitUSD float64             `json:"weekly_limit_usd"`
+	CodexAuthIDs   []string            `json:"codex_auth_ids,omitempty"`
+	CodexGroup     string              `json:"codex_group,omitempty"`
+	CodexFallback  bool                `json:"codex_fallback,omitempty"`
 	Usage          policy.UsageSummary `json:"usage"`
 	CreatedAt      string              `json:"created_at,omitempty"`
 	UpdatedAt      string              `json:"updated_at,omitempty"`
@@ -318,7 +346,7 @@ func (a *App) bindKey(body []byte) ManagementResponse {
 	if req.RPM != nil {
 		rpm = *req.RPM
 	}
-	name := id
+	name := policy.PreviewKey(plain)
 	if req.Name != nil && strings.TrimSpace(*req.Name) != "" {
 		name = strings.TrimSpace(*req.Name)
 	}
@@ -333,6 +361,15 @@ func (a *App) bindKey(body []byte) ManagementResponse {
 		RPM:            rpm,
 		DailyLimitUSD:  applyFloat64(req.DailyLimitUSD, 0),
 		WeeklyLimitUSD: applyFloat64(req.WeeklyLimitUSD, 0),
+	}
+	if req.CodexAuthIDs != nil {
+		item.CodexAuthIDs = *req.CodexAuthIDs
+	}
+	if req.CodexGroup != nil {
+		item.CodexGroup = *req.CodexGroup
+	}
+	if req.CodexFallback != nil {
+		item.CodexFallback = *req.CodexFallback
 	}
 	if err := a.store.UpsertKey(item, true); err != nil {
 		return jsonError(http.StatusBadRequest, "invalid_policy", err.Error())
@@ -352,6 +389,9 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 	updated, err := a.store.UpdateKey(id, func(current *policy.KeyConfig) error {
 		if req.Name != nil {
 			current.Name = strings.TrimSpace(*req.Name)
+			if current.Name == "" || policy.MatchHash(current.Name, current.KeyHash) {
+				current.Name = current.KeyPreview
+			}
 		}
 		if req.Enabled != nil {
 			current.Enabled = *req.Enabled
@@ -364,6 +404,15 @@ func (a *App) patchKey(body []byte) ManagementResponse {
 		}
 		if req.WeeklyLimitUSD != nil {
 			current.WeeklyLimitUSD = *req.WeeklyLimitUSD
+		}
+		if req.CodexAuthIDs != nil {
+			current.CodexAuthIDs = *req.CodexAuthIDs
+		}
+		if req.CodexGroup != nil {
+			current.CodexGroup = *req.CodexGroup
+		}
+		if req.CodexFallback != nil {
+			current.CodexFallback = *req.CodexFallback
 		}
 		plain := strings.TrimSpace(req.Key)
 		if plain != "" {
@@ -486,6 +535,9 @@ func (a *App) publicKeyFromConfig(key policy.KeyConfig) publicKey {
 		RPM:            key.RPM,
 		DailyLimitUSD:  key.DailyLimitUSD,
 		WeeklyLimitUSD: key.WeeklyLimitUSD,
+		CodexAuthIDs:   key.CodexAuthIDs,
+		CodexGroup:     key.CodexGroup,
+		CodexFallback:  key.CodexFallback,
 		Usage:          a.store.UsageSummaryFor(key),
 	}
 	if !key.CreatedAt.IsZero() {

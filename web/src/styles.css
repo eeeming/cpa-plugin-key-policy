@@ -234,6 +234,53 @@ th.num, td.num { text-align: right; }
 }
 .modal h3 { margin: 0 0 14px; font-size: 18px; font-weight: 700; }
 
+.codex-binding {
+  min-width: 0; margin: 16px 0; padding: 16px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.codex-binding legend { padding: 0 6px; font-weight: 600; }
+.codex-hint { margin: 4px 0 10px; font-size: 12px; line-height: 1.5; }
+.codex-directory-status { margin-bottom: 12px; font-size: 13px; line-height: 1.5; }
+.codex-directory-error { overflow-wrap: anywhere; }
+.codex-accounts {
+  max-height: 260px; overflow-y: auto; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.codex-accounts > p { padding: 0 12px; font-size: 13px; }
+.codex-account {
+  display: flex; align-items: flex-start; gap: 10px; padding: 12px;
+  cursor: pointer; border-bottom: 1px solid var(--border);
+}
+.codex-account:last-child { border-bottom: 0; }
+.codex-account:hover, .codex-account:focus-within { background: var(--muted-bg); }
+.codex-account input, .codex-fallback input { flex: none; accent-color: var(--accent); }
+.codex-account input { margin-top: 3px; }
+.codex-account-details {
+  min-width: 0; display: flex; flex-direction: column; gap: 3px;
+  font-size: 12px; color: var(--muted); overflow-wrap: anywhere;
+}
+.codex-account-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.codex-account-flags { display: flex; flex-wrap: wrap; gap: 4px; }
+.codex-account-flags:empty { display: none; }
+.codex-manual { resize: vertical; min-height: 72px; }
+.codex-add { align-self: flex-start; }
+.codex-fallback { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; cursor: pointer; }
+
+.scheduler-diagnostics {
+  margin-bottom: 16px; padding: 16px;
+  border: 1px solid var(--danger-border); border-radius: var(--r-md);
+  background: var(--panel);
+}
+.scheduler-diagnostics-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.scheduler-diagnostics h2 { margin: 0; font-size: 15px; }
+.scheduler-risk { margin: 12px 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--danger-soft); color: var(--danger); line-height: 1.6; font-size: 13px; }
+.scheduler-diagnostics dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 12px; margin: 12px 0; }
+.scheduler-diagnostics dl > div { min-width: 0; }
+.scheduler-diagnostics dt { color: var(--muted); font-size: 12px; margin-bottom: 4px; }
+.scheduler-diagnostics dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+.scheduler-diagnostics-note { font-size: 13px; line-height: 1.6; margin: 8px 0 0; }
+.scheduler-diagnostics-error { color: var(--danger); overflow-wrap: anywhere; }
+
 .fp-head {
   display: flex; align-items: center; justify-content: space-between;
   gap: 12px; flex-wrap: wrap;
@@ -405,6 +452,12 @@ th.num, td.num { text-align: right; }
 .keycard .kc-spend {
   font-size: 12px; color: var(--muted); margin: 0;
 }
+.keycard .kc-binding {
+  grid-column: 3; min-width: 0; display: flex; flex-direction: column; gap: 3px;
+  margin-top: 6px; padding-top: 8px; border-top: 1px dashed var(--border);
+  font-size: 12px; color: var(--muted); overflow-wrap: anywhere;
+}
+.kc-binding-ids { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .keycard .kc-models {
   margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
   overflow-x: auto;

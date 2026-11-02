@@ -15,6 +15,7 @@ const (
 
 	MethodRequestInterceptBefore = "request.intercept_before"
 	MethodRequestInterceptAfter  = "request.intercept_after"
+	MethodSchedulerPick          = "scheduler.pick"
 
 	MethodUsageHandle = "usage.handle"
 
@@ -72,6 +73,7 @@ type Capabilities struct {
 	FrontendAuthProviderExclusive bool `json:"frontend_auth_provider_exclusive,omitempty"`
 	ModelRouter                   bool `json:"model_router"`
 	Scheduler                     bool `json:"scheduler,omitempty"`
+	SchedulerAcrossPriorities     bool `json:"scheduler_across_priorities,omitempty"`
 	RequestInterceptor            bool `json:"request_interceptor"`
 	ResponseInterceptor           bool `json:"response_interceptor"`
 	UsagePlugin                   bool `json:"usage_plugin"`
